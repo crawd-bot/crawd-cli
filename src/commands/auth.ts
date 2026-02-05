@@ -22,11 +22,12 @@ export async function authCommand() {
         config.apiKey = token
         saveConfig(config)
 
-        res.writeHead(200, { 'Content-Type': 'text/html' })
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
         res.end(`
           <!DOCTYPE html>
           <html>
             <head>
+              <meta charset="utf-8">
               <title>crawd.bot - Authenticated</title>
               <style>
                 body {
