@@ -14,6 +14,7 @@ export const fmt = {
   cmd: (cmd: string) => chalk.green(cmd),
   bold: (s: string) => chalk.bold(s),
   dim: (s: string) => chalk.dim(s),
+  success: (s: string) => chalk.green(s),
 }
 
 /** Print a labeled key-value pair */

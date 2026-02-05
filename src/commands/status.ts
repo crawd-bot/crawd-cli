@@ -1,43 +1,73 @@
 import { loadConfig } from '../config/store.js'
-import { getProcessStatus } from '../daemon/pid.js'
-import { fmt, printHeader, printKv, printStatus } from '../utils/logger.js'
+import { log, fmt } from '../utils/logger.js'
 
-export function statusCommand() {
-  const status = getProcessStatus()
+const PLATFORM_URL = 'https://platform.crawd.bot'
+
+export async function statusCommand() {
   const config = loadConfig()
 
-  const anyRunning = status.backend.running || status.overlay.running
-
-  printHeader('CRAWD Status')
+  console.log()
+  console.log(fmt.bold('crawd.bot CLI'))
   console.log()
 
-  printStatus(
-    'Backend',
-    status.backend.running,
-    status.backend.pid ? `PID ${status.backend.pid}` : undefined
-  )
-  printStatus(
-    'Overlay',
-    status.overlay.running,
-    status.overlay.pid ? `PID ${status.overlay.pid}` : undefined
-  )
-
-  if (anyRunning) {
+  if (!config.apiKey) {
+    log.warn('Not authenticated')
+    log.dim('Run: crawd auth')
     console.log()
-    printHeader('URLs')
-    printKv('Overlay', fmt.url(`http://localhost:${config.ports.overlay}`))
-    printKv('Backend', fmt.url(`http://localhost:${config.ports.backend}`))
-    printKv('OBS Source', fmt.url(`http://localhost:${config.ports.overlay}`))
+    return
   }
 
-  console.log()
+  log.info('Fetching stream status...')
 
-  if (!anyRunning) {
-    console.log('  Start with: crawd up')
-  } else {
-    console.log('  Stop with: crawd down')
-    console.log('  View logs: crawd logs')
+  try {
+    const response = await fetch(`${PLATFORM_URL}/api/stream`, {
+      headers: {
+        'Authorization': `Bearer ${config.apiKey}`,
+      },
+    })
+
+    if (response.status === 401) {
+      log.error('Authentication expired')
+      log.dim('Run: crawd auth')
+      return
+    }
+
+    const data = await response.json()
+
+    if (data.error) {
+      log.error(data.error)
+      return
+    }
+
+    const { stream } = data
+
+    console.log()
+    console.log(fmt.bold('Stream Status'))
+    console.log()
+
+    if (stream.isLive) {
+      console.log(`  Status:     ${fmt.success('● LIVE')}`)
+    } else {
+      console.log(`  Status:     ${fmt.dim('○ Offline')}`)
+    }
+
+    console.log(`  Name:       ${stream.name}`)
+    console.log(`  Viewers:    ${stream.viewerCount}`)
+    console.log()
+    console.log(fmt.bold('OBS Settings'))
+    console.log()
+    console.log(`  Server:     ${fmt.dim(stream.rtmpUrl)}`)
+    console.log(`  Stream Key: ${fmt.dim(stream.streamKey.slice(0, 20) + '...')}`)
+
+    if (stream.playbackId) {
+      console.log()
+      console.log(fmt.bold('Preview'))
+      console.log()
+      console.log(`  ${fmt.url(`${PLATFORM_URL}/preview/${stream.playbackId}`)}`)
+    }
+
+    console.log()
+  } catch (err) {
+    log.error(`Failed to fetch status: ${err instanceof Error ? err.message : err}`)
   }
-
-  console.log()
 }

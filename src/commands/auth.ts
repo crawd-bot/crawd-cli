@@ -1,48 +1,33 @@
 import { createServer } from 'http'
 import open from 'open'
-import { saveEnv, loadEnv, updateConfig } from '../config/store.js'
+import { saveConfig, loadConfig } from '../config/store.js'
 import { log, fmt } from '../utils/logger.js'
 
-const CRAWD_AUTH_URL = 'https://crawd.bot/auth/cli'
+const PLATFORM_URL = 'https://platform.crawd.bot'
 const CALLBACK_PORT = 9876
 
 export async function authCommand() {
-  log.info('Starting authentication flow...')
+  log.info('Starting authentication...')
 
-  // Create a temporary server to receive the OAuth callback
+  // Create a temporary server to receive the callback
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', `http://localhost:${CALLBACK_PORT}`)
 
     if (url.pathname === '/callback') {
       const token = url.searchParams.get('token')
-      const gatewayToken = url.searchParams.get('gateway_token')
-      const gatewayUrl = url.searchParams.get('gateway_url')
 
       if (token) {
-        // Save credentials
-        const env = loadEnv()
-        env.CRAWD_API_KEY = token
-        if (gatewayToken) {
-          env.CRAWD_GATEWAY_TOKEN = gatewayToken
-        }
-        saveEnv(env)
-
-        // Update config
-        updateConfig({
-          apiKey: token,
-          gateway: {
-            token: gatewayToken ?? undefined,
-            url: gatewayUrl ?? 'ws://localhost:18789',
-            channelId: 'live',
-          },
-        })
+        // Save the API key
+        const config = loadConfig()
+        config.apiKey = token
+        saveConfig(config)
 
         res.writeHead(200, { 'Content-Type': 'text/html' })
         res.end(`
           <!DOCTYPE html>
           <html>
             <head>
-              <title>CRAWD - Authenticated</title>
+              <title>crawd.bot - Authenticated</title>
               <style>
                 body {
                   font-family: system-ui, -apple-system, sans-serif;
@@ -51,15 +36,15 @@ export async function authCommand() {
                   align-items: center;
                   height: 100vh;
                   margin: 0;
-                  background: #1a1a2e;
-                  color: #eee;
+                  background: #000;
+                  color: #fff;
                 }
                 .container {
                   text-align: center;
                   padding: 2rem;
                 }
-                h1 { color: #00d4ff; }
-                p { color: #aaa; }
+                h1 { color: #FBA875; }
+                p { color: #888; }
               </style>
             </head>
             <body>
@@ -72,7 +57,7 @@ export async function authCommand() {
         `)
 
         log.success('Authentication successful!')
-        log.dim('Credentials saved to ~/.crawd/.env')
+        log.dim('API key saved to ~/.crawd/config.json')
 
         setTimeout(() => {
           server.close()
@@ -90,7 +75,8 @@ export async function authCommand() {
   })
 
   server.listen(CALLBACK_PORT, () => {
-    const authUrl = `${CRAWD_AUTH_URL}?callback=http://localhost:${CALLBACK_PORT}/callback`
+    const callbackUrl = `http://localhost:${CALLBACK_PORT}/callback`
+    const authUrl = `${PLATFORM_URL}/auth/cli?callback=${encodeURIComponent(callbackUrl)}`
 
     log.info('Opening browser for authentication...')
     console.log()
