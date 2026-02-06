@@ -94,6 +94,10 @@ export class GatewayClient implements IGatewayClient {
   /** Track active run IDs for our session to detect if agent is busy */
   private activeRunIds = new Set<string>()
   private targetSessionKey: string
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private reconnectDelay = 1000
+  private readonly maxReconnectDelay = 30_000
+  private shouldReconnect = false
 
   constructor(url: string, token: string, sessionKey: string = SESSION_KEY) {
     this.url = url
@@ -103,17 +107,24 @@ export class GatewayClient implements IGatewayClient {
 
 
   async connect(): Promise<void> {
+    this.shouldReconnect = true
+    return this.doConnect()
+  }
+
+  private async doConnect(): Promise<void> {
     return new Promise((resolve, reject) => {
       this.ws = new WebSocket(this.url)
+      let settled = false
 
       this.ws.on('open', async () => {
         try {
           await this.authenticate()
           this.connected = true
+          this.reconnectDelay = 1000
           console.log('[Gateway] Connected and authenticated')
-          resolve()
+          if (!settled) { settled = true; resolve() }
         } catch (err) {
-          reject(err)
+          if (!settled) { settled = true; reject(err) }
         }
       })
 
@@ -129,13 +140,30 @@ export class GatewayClient implements IGatewayClient {
       this.ws.on('close', () => {
         this.connected = false
         console.log('[Gateway] Disconnected')
+        this.scheduleReconnect()
       })
 
       this.ws.on('error', (err) => {
         console.error('[Gateway] Error:', err)
-        reject(err)
+        if (!settled) { settled = true; reject(err) }
       })
     })
+  }
+
+  private scheduleReconnect(): void {
+    if (!this.shouldReconnect) return
+    if (this.reconnectTimer) return
+    console.log(`[Gateway] Reconnecting in ${this.reconnectDelay / 1000}s...`)
+    this.reconnectTimer = setTimeout(async () => {
+      this.reconnectTimer = null
+      try {
+        await this.doConnect()
+      } catch {
+        // doConnect failed, bump delay and retry
+        this.reconnectDelay = Math.min(this.reconnectDelay * 2, this.maxReconnectDelay)
+        this.scheduleReconnect()
+      }
+    }, this.reconnectDelay)
   }
 
   private async authenticate(): Promise<void> {
@@ -272,6 +300,11 @@ export class GatewayClient implements IGatewayClient {
   }
 
   disconnect(): void {
+    this.shouldReconnect = false
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
     this.ws?.close()
     this.ws = null
     this.connected = false
