@@ -12,7 +12,7 @@ import { talkCommand } from './commands/talk.js'
 import { logsCommand } from './commands/logs.js'
 import { configShowCommand, configGetCommand, configSetCommand } from './commands/config.js'
 
-const VERSION = '0.2.0'
+const VERSION = '0.3.0'
 
 const program = new Command()
 

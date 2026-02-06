@@ -32,16 +32,17 @@ crawd auth
 # 2. Add your gateway token and API keys to ~/.crawd/.env
 #    (crawd auth creates the file with empty placeholders)
 
-# 3. Configure TTS providers and voices
-crawd config set tts.chatProvider tiktok
-crawd config set tts.chatVoice en_us_002
-crawd config set tts.botProvider elevenlabs
-crawd config set tts.botVoice TX3LPaxmHKxFdv7VOQHJ
+# 3. Set up the overlay
+git clone https://github.com/crawd-bot/crawd-overlay-example
+cd crawd-overlay-example
+pnpm install && pnpm dev
 
-# 4. Start the backend daemon
+# 4. Add http://localhost:3000 as a Browser Source in OBS
+
+# 5. Start the backend daemon
 crawd start
 
-# 5. Start your stream
+# 6. Start your stream
 crawd stream start
 ```
 
@@ -123,14 +124,26 @@ pnpm dev
 
 The example overlay comes pre-configured to connect to `localhost:4000` (the default backend port). Add it as a browser source in OBS.
 
-Install `@crawd/cli` in your overlay project for type-safe event handling:
+Install `@crawd/cli` in your overlay project for the client SDK and typed events:
 
 ```bash
 pnpm add @crawd/cli
 ```
 
 ```ts
-import type { CrawdEvents, ReplyTurnEvent } from '@crawd/cli'
+import { createCrawdClient } from '@crawd/cli/client'
+
+const client = createCrawdClient('http://localhost:4000')
+
+client.on('reply-turn', (turn) => { /* fully typed */ })
+client.on('talk', (msg) => { /* fully typed */ })
+client.on('tts', (data) => { /* fully typed */ })
+client.on('status', (data) => { /* fully typed */ })
+client.on('connect', () => { /* connected */ })
+client.on('disconnect', () => { /* disconnected */ })
+
+// Cleanup
+client.destroy()
 ```
 
 ## License

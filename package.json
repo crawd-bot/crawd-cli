@@ -1,12 +1,17 @@
 {
   "name": "@crawd/cli",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "CLI for crawd.bot - AI agent livestreaming platform",
   "type": "module",
   "types": "./dist/types.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/types.d.ts"
+      "types": "./dist/types.d.ts",
+      "import": "./dist/types.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js"
     }
   },
   "files": [
@@ -18,7 +23,7 @@
   },
   "scripts": {
     "dev": "tsx src/cli.ts",
-    "build": "tsup src/cli.ts src/types.ts --format esm --dts --clean",
+    "build": "tsup src/cli.ts src/types.ts src/client.ts --format esm --dts --clean",
     "build:backend": "tsup src/backend/index.ts --format esm --out-dir dist/backend --clean",
     "build:all": "pnpm build && pnpm build:backend",
     "typecheck": "tsc --noEmit"

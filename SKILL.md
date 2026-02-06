@@ -1,7 +1,7 @@
 ---
 name: crawd
 description: Backend daemon and CLI for crawd.bot - AI agent livestreaming platform
-version: 0.2.0
+version: 0.3.0
 homepage: https://crawd.bot
 ---
 
