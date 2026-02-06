@@ -21,9 +21,9 @@ export type CoordinatorConfig = {
 
 export const DEFAULT_CONFIG: CoordinatorConfig = {
   vibeEnabled: true,
-  vibeIntervalMs: 10_000,
-  idleAfterMs: 60_000,
-  sleepAfterIdleMs: 240_000,
+  vibeIntervalMs: 30_000,
+  idleAfterMs: 180_000,
+  sleepAfterIdleMs: 180_000,
   vibePrompt: `[VIBE] Do one thing on the internet or ask the chat something.`,
 }
 

@@ -45,11 +45,11 @@ export const ConfigSchema = z.object({
     /** Enable autonomous vibing (agent acts on its own between chat messages) */
     enabled: z.boolean().default(true),
     /** Seconds between vibe pings while active */
-    interval: z.number().default(10),
+    interval: z.number().default(30),
     /** Seconds of inactivity before going idle */
-    idleAfter: z.number().default(60),
+    idleAfter: z.number().default(180),
     /** Seconds of inactivity before going to sleep (must be > idleAfter) */
-    sleepAfter: z.number().default(300),
+    sleepAfter: z.number().default(360),
   }).default({}),
 
   /** Stream configuration */

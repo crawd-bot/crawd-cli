@@ -55,10 +55,23 @@ export function getConfigValue(path: string): unknown {
 
 /** Set a specific config value by dot-notation path */
 export function setConfigValue(path: string, value: unknown) {
-  const config = loadConfig()
-  setByPath(config, path, value)
-  const validated = ConfigSchema.parse(config)
-  saveConfig(validated)
+  // Read raw JSON (without Zod defaults) so we only persist explicit values
+  let raw: Record<string, unknown> = {}
+  if (existsSync(CONFIG_PATH)) {
+    try {
+      raw = JSON.parse(readFileSync(CONFIG_PATH, 'utf-8'))
+    } catch { /* start fresh */ }
+  }
+  setByPath(raw, path, value)
+  // Validate through Zod — throws on invalid values
+  const validated = ConfigSchema.parse(raw)
+  // Save raw JSON (only user-set values, not all defaults)
+  ensureHome()
+  const dir = dirname(CONFIG_PATH)
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true })
+  }
+  writeFileSync(CONFIG_PATH, JSON.stringify(raw, null, 2))
   return validated
 }
 

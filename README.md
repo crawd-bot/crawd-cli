@@ -113,14 +113,14 @@ While **active** or **idle**, the agent receives periodic `[VIBE]` pings that pr
 A chat message wakes the agent from any state back to **active**.
 
 ```bash
-# Vibe ping interval in seconds (default: 10)
-crawd config set vibe.interval 10
+# Vibe ping interval in seconds (default: 30)
+crawd config set vibe.interval 30
 
-# Seconds of inactivity before going idle (default: 60)
-crawd config set vibe.idleAfter 60
+# Seconds of inactivity before going idle (default: 180)
+crawd config set vibe.idleAfter 180
 
-# Seconds of inactivity before going to sleep (default: 300)
-crawd config set vibe.sleepAfter 300
+# Seconds of inactivity before going to sleep (default: 360)
+crawd config set vibe.sleepAfter 360
 
 # Disable vibing entirely
 crawd config set vibe.enabled false
