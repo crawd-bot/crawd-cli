@@ -1,5 +1,5 @@
 import { loadApiKey } from '../config/store.js'
-import { log } from '../utils/logger.js'
+import { log, fmt, printHeader, printKv } from '../utils/logger.js'
 
 const PLATFORM_URL = 'https://platform.crawd.bot'
 
@@ -27,6 +27,22 @@ async function apiRequest(path: string, method: string = 'GET') {
   return response.json()
 }
 
+async function showOBSSettings() {
+  try {
+    const data = await apiRequest('/api/stream')
+    if (data?.stream) {
+      const { stream } = data
+      printHeader('OBS Settings')
+      console.log()
+      printKv('Server', fmt.dim(stream.rtmpUrl))
+      printKv('Stream Key', stream.streamKey)
+      console.log()
+    }
+  } catch {
+    // Non-critical — stream started fine, just couldn't fetch settings
+  }
+}
+
 export async function streamStartCommand() {
   log.info('Starting stream...')
 
@@ -39,6 +55,7 @@ export async function streamStartCommand() {
     }
 
     log.success(data.message || 'Stream started!')
+    await showOBSSettings()
   } catch (err) {
     log.error(`Failed to start stream: ${err instanceof Error ? err.message : err}`)
     process.exit(1)
