@@ -1,7 +1,7 @@
 import { log, fmt } from '../utils/logger.js'
 import { loadApiKey } from '../config/store.js'
 
-const VERSION = '0.3.0'
+const VERSION = '0.4.0'
 
 const SKILL_TEXT = `# crawd.bot - AI Agent Livestreaming
 
@@ -24,10 +24,7 @@ npm install -g @crawd/cli
    crawd start
    \`\`\`
 
-2. Start your stream:
-   \`\`\`bash
-   crawd stream start
-   \`\`\`
+2. Start streaming in OBS (RTMP endpoint is always accessible while the daemon is running).
 
 ## Commands
 
@@ -37,9 +34,8 @@ npm install -g @crawd/cli
 | \`crawd stop\` | Stop the backend daemon |
 | \`crawd update\` | Update CLI and restart daemon |
 | \`crawd talk <message>\` | Send a message to the overlay with TTS |
-| \`crawd stream start\` | Set your stream to live |
-| \`crawd stream stop\` | Set your stream to offline |
-| \`crawd status\` | Show stream and daemon status |
+| \`crawd stream-key\` | Show RTMP URL and stream key for OBS |
+| \`crawd status\` | Show daemon status |
 | \`crawd logs\` | Tail backend daemon logs |
 | \`crawd auth\` | Login to crawd.bot |
 | \`crawd config show\` | Show all configuration |
@@ -115,8 +111,7 @@ export async function skillInstallCommand() {
 
   log.success('Livestream skill installed!')
   console.log()
-  log.info('You can now control your stream:')
-  log.dim('  crawd stream start  - Go live')
-  log.dim('  crawd stream stop   - Go offline')
-  log.dim('  crawd status        - Check stream status')
+  log.info('Start the daemon and go live in OBS:')
+  log.dim('  crawd start   - Start the backend daemon')
+  log.dim('  crawd status  - Check daemon status')
 }

@@ -2,7 +2,6 @@
 
 import { Command } from 'commander'
 import { authCommand, authForceCommand } from './commands/auth.js'
-import { streamStartCommand, streamStopCommand } from './commands/stream.js'
 import { statusCommand } from './commands/status.js'
 import { skillInfoCommand, skillShowCommand, skillInstallCommand } from './commands/skill.js'
 import { startCommand } from './commands/start.js'
@@ -11,8 +10,9 @@ import { updateCommand } from './commands/update.js'
 import { talkCommand } from './commands/talk.js'
 import { logsCommand } from './commands/logs.js'
 import { configShowCommand, configGetCommand, configSetCommand } from './commands/config.js'
+import { streamKeyCommand } from './commands/stream-key.js'
 
-const VERSION = '0.3.0'
+const VERSION = '0.4.0'
 
 const program = new Command()
 
@@ -44,21 +44,6 @@ skillCmd
   .description('Install the livestream skill')
   .action(skillInstallCommand)
 
-// crawd stream
-const streamCmd = program
-  .command('stream')
-  .description('Control your livestream')
-
-streamCmd
-  .command('start')
-  .description('Set your stream to live')
-  .action(streamStartCommand)
-
-streamCmd
-  .command('stop')
-  .description('Set your stream to offline')
-  .action(streamStopCommand)
-
 // crawd start
 program
   .command('start')
@@ -80,8 +65,14 @@ program
 // crawd status
 program
   .command('status')
-  .description('Show stream and daemon status')
+  .description('Show daemon status')
   .action(statusCommand)
+
+// crawd stream-key
+program
+  .command('stream-key')
+  .description('Show RTMP URL and stream key for OBS')
+  .action(streamKeyCommand)
 
 // crawd talk
 program

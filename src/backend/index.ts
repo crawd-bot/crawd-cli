@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { randomUUID } from "crypto";
 import { writeFile, mkdir } from "fs/promises";
+import { watch } from "fs";
 import { join } from "path";
 import Fastify from "fastify";
 import fastifyStatic from "@fastify/static";
@@ -15,6 +16,8 @@ import { Coordinator, type AgentReply, type CoordinatorConfig, type CoordinatorE
 import { generateShortId } from "../lib/chat/types";
 import { configureTikTokTTS, generateTikTokTTS } from "../lib/tts/tiktok";
 import type { ChatMessage } from "../lib/chat/types";
+import { loadEnv, loadConfig } from "../config/store.js";
+import { ENV_PATH, CONFIG_PATH } from "../utils/paths.js";
 import type { TtsProvider, ReplyTurnEvent } from "../types";
 
 // Parse coordinator config from env vars
@@ -46,11 +49,11 @@ const TOKEN_MINT = process.env.NEXT_PUBLIC_TOKEN_MINT;
 const MCAP_POLL_MS = 10_000;
 const TTS_DIR = join(process.cwd(), "tmp", "tts");
 
-// TTS provider selection from config (passed as env vars by `crawd start`)
-const CHAT_PROVIDER = (process.env.TTS_CHAT_PROVIDER || 'tiktok') as TtsProvider;
-const CHAT_VOICE = process.env.TTS_CHAT_VOICE;
-const BOT_PROVIDER = (process.env.TTS_BOT_PROVIDER || 'elevenlabs') as TtsProvider;
-const BOT_VOICE = process.env.TTS_BOT_VOICE;
+// TTS provider selection — mutable, updated by file watcher
+let CHAT_PROVIDER = (process.env.TTS_CHAT_PROVIDER || 'tiktok') as TtsProvider;
+let CHAT_VOICE = process.env.TTS_CHAT_VOICE;
+let BOT_PROVIDER = (process.env.TTS_BOT_PROVIDER || 'elevenlabs') as TtsProvider;
+let BOT_VOICE = process.env.TTS_BOT_VOICE;
 
 // Unique version ID generated at startup - changes on each deploy/restart
 const BUILD_VERSION = randomUUID();
@@ -72,6 +75,62 @@ if (process.env.ELEVENLABS_API_KEY) {
 // Configure TikTok TTS if session ID is available
 if (process.env.TIKTOK_SESSION_ID) {
   configureTikTokTTS(process.env.TIKTOK_SESSION_ID);
+}
+
+// --- Auto-reload ~/.crawd/.env and config.json on change ---
+
+async function reloadConfig() {
+  const env = loadEnv();
+  const config = loadConfig();
+  const changes: string[] = [];
+
+  // Update secrets in process.env
+  for (const [key, value] of Object.entries(env)) {
+    if (value && process.env[key] !== value) {
+      changes.push(key);
+      process.env[key] = value;
+    }
+  }
+
+  // Update TTS provider/voice from config
+  const newChatProvider = (config.tts.chatProvider || 'tiktok') as TtsProvider;
+  const newChatVoice = config.tts.chatVoice;
+  const newBotProvider = (config.tts.botProvider || 'elevenlabs') as TtsProvider;
+  const newBotVoice = config.tts.botVoice;
+
+  if (newChatProvider !== CHAT_PROVIDER) { changes.push('tts.chatProvider'); CHAT_PROVIDER = newChatProvider; }
+  if (newChatVoice !== CHAT_VOICE) { changes.push('tts.chatVoice'); CHAT_VOICE = newChatVoice; }
+  if (newBotProvider !== BOT_PROVIDER) { changes.push('tts.botProvider'); BOT_PROVIDER = newBotProvider; }
+  if (newBotVoice !== BOT_VOICE) { changes.push('tts.botVoice'); BOT_VOICE = newBotVoice; }
+
+  // Reinitialize ElevenLabs client if key changed
+  if (changes.includes('ELEVENLABS_API_KEY') && process.env.ELEVENLABS_API_KEY) {
+    try {
+      const { ElevenLabsClient } = await import("@elevenlabs/elevenlabs-js");
+      elevenlabs = new ElevenLabsClient({ apiKey: process.env.ELEVENLABS_API_KEY });
+    } catch { /* already warned at startup */ }
+  }
+
+  // Reconfigure TikTok TTS if session ID changed
+  if (changes.includes('TIKTOK_SESSION_ID') && process.env.TIKTOK_SESSION_ID) {
+    configureTikTokTTS(process.env.TIKTOK_SESSION_ID);
+  }
+
+  if (changes.length > 0) {
+    fastify.log.info({ changes }, 'Config reloaded');
+  }
+}
+
+let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleReload() {
+  if (reloadTimer) clearTimeout(reloadTimer);
+  reloadTimer = setTimeout(() => reloadConfig(), 100);
+}
+
+for (const file of [ENV_PATH, CONFIG_PATH]) {
+  try {
+    watch(file, () => scheduleReload());
+  } catch { /* file may not exist yet */ }
 }
 
 // --- TTS provider functions ---
@@ -159,10 +218,10 @@ async function tts(text: string, provider: TtsProvider, voice?: string): Promise
 }
 
 /** Generate TTS for a chat message (uses CHAT_PROVIDER) */
-const chatTTS = (text: string) => tts(text, CHAT_PROVIDER, CHAT_VOICE);
+function chatTTS(text: string) { return tts(text, CHAT_PROVIDER, CHAT_VOICE); }
 
 /** Generate TTS for a bot message (uses BOT_PROVIDER) */
-const botTTS = (text: string) => tts(text, BOT_PROVIDER, BOT_VOICE);
+function botTTS(text: string) { return tts(text, BOT_PROVIDER, BOT_VOICE); }
 
 // --- Non-TTS helpers ---
 

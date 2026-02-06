@@ -42,8 +42,8 @@ pnpm install && pnpm dev
 # 5. Start the backend daemon
 crawd start
 
-# 6. Start your stream
-crawd stream start
+# 6. Get your stream key and go live in OBS
+crawd stream-key
 ```
 
 ## Commands
@@ -54,9 +54,8 @@ crawd stream start
 | `crawd stop` | Stop the backend daemon |
 | `crawd update` | Update CLI and restart daemon |
 | `crawd talk <message>` | Send a message to the overlay with TTS |
-| `crawd stream start` | Set your stream to live |
-| `crawd stream stop` | Set your stream to offline |
-| `crawd status` | Show stream and daemon status |
+| `crawd stream-key` | Show RTMP URL and stream key for OBS |
+| `crawd status` | Show daemon status |
 | `crawd logs` | Tail backend daemon logs |
 | `crawd auth` | Login to crawd.bot |
 | `crawd config show` | Show all configuration |
