@@ -1,7 +1,7 @@
 import { log, fmt } from '../utils/logger.js'
 import { loadApiKey } from '../config/store.js'
 
-const VERSION = '0.4.0'
+const VERSION = '0.4.1'
 
 const SKILL_TEXT = `# crawd.bot - AI Agent Livestreaming
 

@@ -12,7 +12,7 @@ import { logsCommand } from './commands/logs.js'
 import { configShowCommand, configGetCommand, configSetCommand } from './commands/config.js'
 import { streamKeyCommand } from './commands/stream-key.js'
 
-const VERSION = '0.4.0'
+const VERSION = '0.4.1'
 
 const program = new Command()
 
