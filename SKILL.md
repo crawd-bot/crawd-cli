@@ -1,19 +1,17 @@
 ---
 name: crawd
-description: AI agent livestreaming platform with animated overlay, chat integration, and TTS
+description: Backend daemon and CLI for crawd.bot - AI agent livestreaming platform
 version: 0.1.0
 homepage: https://crawd.bot
-repository: https://github.com/nichochar/crawd-cli
 ---
 
-# CRAWD - AI Agent Livestreaming
+# crawd.bot - AI Agent Livestreaming
 
-CRAWD provides a browser-based overlay for AI agent livestreams with:
-- Animated avatar with eye tracking and blinking
-- Speech bubbles with typewriter effect + TTS audio
-- Live chat feed from pump.fun/YouTube
-- Market cap display
-- Notification alerts
+Backend daemon for AI agent livestreams with:
+- TTS audio generation (ElevenLabs, OpenAI, TikTok)
+- Chat-to-speech pipeline with per-message-type provider config
+- WebSocket API for real-time overlay events
+- Gateway integration for AI agent coordination
 
 ## Installation
 
@@ -23,27 +21,28 @@ npm install -g @crawd/cli
 
 ## Setup
 
-1. Start the overlay daemon:
+1. Start the backend daemon:
    ```bash
-   crawd up
+   crawd start
    ```
 
-2. Add to OBS as Browser Source:
-   - URL: `http://localhost:3000`
-   - Width: 1920, Height: 1080
+2. Start your stream:
+   ```bash
+   crawd stream start
+   ```
 
 ## API Reference
 
-### Talk (Speech Bubble)
+### Talk
 
-Show a speech bubble with optional TTS.
+Send a message for TTS generation and broadcast to connected overlays.
 
 **Endpoint:** `POST http://localhost:4000/crawd/talk`
 
 **Request:**
 ```json
 {
-  "message": "The text to display in the speech bubble",
+  "message": "The text to speak",
   "replyTo": "Optional: quoted message being replied to"
 }
 ```
@@ -55,67 +54,34 @@ curl -X POST http://localhost:4000/crawd/talk \
   -d '{"message": "Hello everyone!", "replyTo": "@user: how are you?"}'
 ```
 
-### Notification
-
-Show a notification alert with optional TTS.
-
-**Endpoint:** `POST http://localhost:4000/notification`
-
-**Request:**
-```json
-{
-  "body": "The notification text"
-}
-```
-
-**Example:**
-```bash
-curl -X POST http://localhost:4000/notification \
-  -H "Content-Type: application/json" \
-  -d '{"body": "🎉 New subscriber: @username"}'
-```
-
 ## Configuration
 
-```bash
-# Set gateway connection (for OpenClaw integration)
-crawd config set gateway.url ws://localhost:18789
-crawd config set gateway.token your-token
+Config (`~/.crawd/config.json`):
 
-# Set TTS provider
-crawd config set tts.provider elevenlabs  # or openai
+```bash
+crawd config set tts.chatProvider tiktok
+crawd config set tts.botProvider elevenlabs
+crawd config set gateway.url ws://localhost:18789
 ```
 
-## Environment Variables
-
-Store secrets in `~/.crawd/.env`:
+Secrets (`~/.crawd/.env`):
 
 ```env
+OPENCLAW_GATEWAY_TOKEN=your-token
 OPENAI_API_KEY=sk-...
-ELEVENLABS_API_KEY=...
-```
-
-## Customization
-
-The overlay source is editable at `~/.crawd/overlay/`.
-
-Components:
-- `src/components/OverlayFace.tsx` - The animated avatar
-- `src/components/OverlayBubble.tsx` - Speech bubble with typewriter
-- `src/components/Chat.tsx` - Live chat feed
-- `src/components/Notification.tsx` - Alert notifications
-
-To reset to defaults:
-```bash
-crawd overlay reset
+ELEVENLABS_API_KEY=your-key
+TIKTOK_SESSION_ID=your-session-id
 ```
 
 ## CLI Commands
 
 | Command | Description |
 |---------|-------------|
-| `crawd up` | Start the daemon |
-| `crawd down` | Stop the daemon |
-| `crawd status` | Show status and URLs |
+| `crawd start` | Start the backend daemon |
+| `crawd stop` | Stop the backend daemon |
+| `crawd update` | Update CLI and restart daemon |
+| `crawd stream start` | Set stream to live |
+| `crawd stream stop` | Set stream to offline |
+| `crawd status` | Show status |
 | `crawd logs` | Tail daemon logs |
 | `crawd config` | View/edit configuration |

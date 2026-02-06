@@ -62,11 +62,9 @@ export function setConfigValue(path: string, value: unknown) {
   return validated
 }
 
-/** Load environment variables from .env file */
+/** Load secrets from ~/.crawd/.env */
 export function loadEnv(): Record<string, string> {
-  if (!existsSync(ENV_PATH)) {
-    return {}
-  }
+  if (!existsSync(ENV_PATH)) return {}
 
   const content = readFileSync(ENV_PATH, 'utf-8')
   const env: Record<string, string> = {}
@@ -74,26 +72,21 @@ export function loadEnv(): Record<string, string> {
   for (const line of content.split('\n')) {
     const trimmed = line.trim()
     if (!trimmed || trimmed.startsWith('#')) continue
-
     const eqIndex = trimmed.indexOf('=')
     if (eqIndex === -1) continue
-
     const key = trimmed.slice(0, eqIndex).trim()
     let value = trimmed.slice(eqIndex + 1).trim()
-
-    // Remove quotes
     if ((value.startsWith('"') && value.endsWith('"')) ||
         (value.startsWith("'") && value.endsWith("'"))) {
       value = value.slice(1, -1)
     }
-
     env[key] = value
   }
 
   return env
 }
 
-/** Save environment variables to .env file */
+/** Save secrets to ~/.crawd/.env */
 export function saveEnv(env: Record<string, string>) {
   ensureHome()
   const lines = Object.entries(env).map(([k, v]) => `${k}=${v}`)

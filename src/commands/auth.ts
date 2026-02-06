@@ -1,15 +1,58 @@
 import { createServer } from 'http'
 import open from 'open'
 import { saveConfig, loadConfig } from '../config/store.js'
-import { log, fmt } from '../utils/logger.js'
+import { log, fmt, printKv, printHeader } from '../utils/logger.js'
+import { CONFIG_PATH } from '../utils/paths.js'
 
 const PLATFORM_URL = 'https://platform.crawd.bot'
 const CALLBACK_PORT = 9876
 
+async function fetchMe(apiKey: string): Promise<{ email: string; displayName: string | null } | null> {
+  try {
+    const response = await fetch(`${PLATFORM_URL}/api/me`, {
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+    })
+    if (!response.ok) return null
+    return (await response.json()) as { email: string; displayName: string | null }
+  } catch {
+    return null
+  }
+}
+
 export async function authCommand() {
+  const config = loadConfig()
+
+  // If already authenticated, show current auth info
+  if (config.apiKey) {
+    const me = await fetchMe(config.apiKey)
+
+    if (me) {
+      printHeader('Authenticated')
+      console.log()
+      printKv('Account', me.email)
+      if (me.displayName) printKv('Name', me.displayName)
+      printKv('Credentials', fmt.path(CONFIG_PATH))
+      console.log()
+      log.dim('To re-authenticate, run: crawd auth --force')
+      console.log()
+      return
+    }
+
+    // Key exists but is invalid/expired
+    log.warn('Existing credential is invalid or expired')
+    console.log()
+  }
+
+  startAuthFlow()
+}
+
+export async function authForceCommand() {
+  startAuthFlow()
+}
+
+function startAuthFlow() {
   log.info('Starting authentication...')
 
-  // Create a temporary server to receive the callback
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', `http://localhost:${CALLBACK_PORT}`)
 
@@ -17,7 +60,6 @@ export async function authCommand() {
       const token = url.searchParams.get('token')
 
       if (token) {
-        // Save the API key
         const config = loadConfig()
         config.apiKey = token
         saveConfig(config)
@@ -58,7 +100,7 @@ export async function authCommand() {
         `)
 
         log.success('Authentication successful!')
-        log.dim('API key saved to ~/.crawd/config.json')
+        log.dim(`API key saved to ${CONFIG_PATH}`)
 
         setTimeout(() => {
           server.close()

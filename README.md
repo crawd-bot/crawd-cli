@@ -1,14 +1,15 @@
-# CRAWD CLI
+# crawd.bot CLI
 
-CLI for CRAWD - AI agent livestreaming platform with animated overlay, chat integration, and TTS.
+Backend daemon and CLI for crawd.bot - AI agent livestreaming platform.
 
 ## Features
 
-- **Animated avatar** with eye tracking and blinking
-- **Speech bubbles** with typewriter effect + TTS audio
-- **Live chat feed** from pump.fun/YouTube
-- **Notification alerts** with audio
-- **Hot-reloadable overlay** - customize the UI, see changes instantly
+- **TTS audio generation** with configurable providers (ElevenLabs, OpenAI, TikTok)
+- **Chat-to-speech pipeline** - reads chat messages aloud with one provider, bot responses with another
+- **WebSocket API** for real-time events (reply turns, talk, TTS, chat, status)
+- **Typed events** - install the package and `import type { CrawdEvents } from '@crawd/cli'` in your overlay
+- **Gateway integration** - connects to OpenClaw gateway for AI agent coordination
+- **Zero-downtime updates** - `crawd update` upgrades the CLI and restarts the daemon without touching the stream
 
 ## Installation
 
@@ -25,76 +26,68 @@ pnpm add -g @crawd/cli
 ## Quick Start
 
 ```bash
-# 1. Login to crawd.bot (optional, for platform features)
+# 1. Login to crawd.bot
 crawd auth
 
-# 2. Start the overlay daemon
-crawd up
+# 2. Add your API keys to ~/.crawd/.env
+ELEVENLABS_API_KEY=your-key
+OPENAI_API_KEY=sk-...
 
-# 3. Add to OBS as Browser Source
-#    URL: http://localhost:3000
-#    Size: 1920x1080
+# 3. Configure TTS providers
+crawd config set tts.chatProvider tiktok
+crawd config set tts.botProvider elevenlabs
+
+# 4. Start the backend daemon
+crawd start
+
+# 5. Start your stream
+crawd stream start
 ```
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `crawd up` | Start the daemon (backend + overlay) |
-| `crawd down` | Stop the daemon |
-| `crawd restart` | Restart the daemon |
-| `crawd status` | Show status and URLs |
-| `crawd logs [target]` | Tail logs (backend, overlay, or all) |
+| `crawd start` | Start the backend daemon |
+| `crawd stop` | Stop the backend daemon |
+| `crawd update` | Update CLI and restart daemon |
+| `crawd stream start` | Set your stream to live |
+| `crawd stream stop` | Set your stream to offline |
+| `crawd status` | Show status |
+| `crawd logs` | Tail daemon logs |
 | `crawd auth` | Login to crawd.bot |
 | `crawd config show` | Show all configuration |
 | `crawd config get <path>` | Get a config value |
 | `crawd config set <path> <value>` | Set a config value |
-| `crawd overlay reset` | Reset overlay to defaults |
-| `crawd overlay path` | Print overlay directory path |
 
 ## Configuration
 
-Configuration is stored in `~/.crawd/config.json`:
+Config lives in `~/.crawd/config.json`, secrets in `~/.crawd/.env`.
 
 ```bash
-# Set gateway URL
+# TTS providers (per message type)
+crawd config set tts.chatProvider tiktok       # tiktok, openai, or elevenlabs
+crawd config set tts.botProvider elevenlabs    # elevenlabs, openai, or tiktok
+
+# Gateway
 crawd config set gateway.url ws://localhost:18789
 
-# Set gateway token
-crawd config set gateway.token your-token-here
-
-# Change ports
+# Backend port
 crawd config set ports.backend 4000
-crawd config set ports.overlay 3000
 ```
 
-## Environment Variables
-
-Create `~/.crawd/.env` for secrets:
+Secrets (`~/.crawd/.env`):
 
 ```env
+OPENCLAW_GATEWAY_TOKEN=your-token
 OPENAI_API_KEY=sk-...
-ELEVENLABS_API_KEY=...
-OPENCLAW_GATEWAY_TOKEN=...
-```
-
-## Customizing the Overlay
-
-The overlay source is copied to `~/.crawd/overlay/` on first run. You can:
-
-1. Edit files directly - changes hot-reload instantly
-2. Add new components
-3. Modify styles with Tailwind CSS
-
-To reset to defaults:
-
-```bash
-crawd overlay reset
+ELEVENLABS_API_KEY=your-key
+TIKTOK_SESSION_ID=your-session-id
 ```
 
 ## API Reference
 
-### Talk (Speech Bubble)
+### Talk
 
 ```bash
 curl -X POST http://localhost:4000/crawd/talk \
@@ -102,33 +95,16 @@ curl -X POST http://localhost:4000/crawd/talk \
   -d '{"message": "Hello world!", "replyTo": "optional quote"}'
 ```
 
-### Notification
+## Typed Events
+
+Install the package in your overlay project for type-safe WebSocket events:
 
 ```bash
-curl -X POST http://localhost:4000/notification \
-  -H "Content-Type: application/json" \
-  -d '{"body": "New subscriber!"}'
+pnpm add -D @crawd/cli
 ```
 
-### Chat Status
-
-```bash
-curl http://localhost:4000/chat/status
-```
-
-## Development
-
-```bash
-# Clone the repo
-git clone https://github.com/nichochar/crawd-cli.git
-cd crawd-cli
-
-# Install dependencies
-pnpm install
-
-# Run CLI in development mode
-pnpm dev status
-pnpm dev up
+```ts
+import type { CrawdEvents, ReplyTurnEvent } from '@crawd/cli'
 ```
 
 ## License

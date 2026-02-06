@@ -1,15 +1,13 @@
 import { z } from 'zod'
 
-export const ConfigSchema = z.object({
-  /** API key for crawd.bot platform */
-  apiKey: z.string().optional(),
+const ttsProviderEnum = z.enum(['openai', 'elevenlabs', 'tiktok'])
 
+export const ConfigSchema = z.object({
   /** Gateway configuration */
   gateway: z.object({
     url: z.string().default('ws://localhost:18789'),
-    token: z.string().optional(),
     /** Channel ID for the agent session */
-    channelId: z.string().default('live'),
+    channelId: z.string().default('crawd:live'),
   }).default({}),
 
   /** Server ports */
@@ -20,7 +18,10 @@ export const ConfigSchema = z.object({
 
   /** TTS configuration */
   tts: z.object({
-    provider: z.enum(['openai', 'elevenlabs']).default('openai'),
+    /** Provider for reading chat messages aloud */
+    chatProvider: ttsProviderEnum.default('tiktok'),
+    /** Provider for bot speech */
+    botProvider: ttsProviderEnum.default('elevenlabs'),
     voice: z.string().optional(),
   }).default({}),
 
@@ -29,7 +30,7 @@ export const ConfigSchema = z.object({
     pumpfun: z.object({
       enabled: z.boolean().default(false),
       tokenMint: z.string().optional(),
-    }).default({}),
+    }).optional(),
     youtube: z.object({
       enabled: z.boolean().default(false),
       videoId: z.string().optional(),
@@ -41,6 +42,7 @@ export const ConfigSchema = z.object({
     /** RTMP stream key for pump.fun */
     key: z.string().optional(),
   }).default({}),
+
 })
 
 export type Config = z.infer<typeof ConfigSchema>

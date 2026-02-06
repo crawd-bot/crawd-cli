@@ -7,7 +7,7 @@ export async function upCommand(options: { force?: boolean }) {
   const status = getProcessStatus()
 
   if (status.backend.running && status.overlay.running) {
-    log.warn('CRAWD is already running')
+    log.warn('crawd.bot is already running')
     log.dim('Use `crawd restart` to restart, or `crawd down` to stop')
     return
   }
@@ -28,7 +28,7 @@ export async function upCommand(options: { force?: boolean }) {
 
     const newStatus = getProcessStatus()
 
-    printHeader('CRAWD is starting...')
+    printHeader('crawd.bot is starting...')
     console.log()
 
     if (newStatus.backend.running) {

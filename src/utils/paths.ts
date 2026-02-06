@@ -12,7 +12,7 @@ export const CRAWD_HOME = join(homedir(), '.crawd')
 /** Config file path */
 export const CONFIG_PATH = join(CRAWD_HOME, 'config.json')
 
-/** Environment file for secrets */
+/** Secrets file path */
 export const ENV_PATH = join(CRAWD_HOME, '.env')
 
 /** PID files directory */
@@ -37,15 +37,17 @@ export const BACKEND_TEMPLATE_DIR = join(__dirname, '../backend')
 export const BACKEND_DIR = join(CRAWD_HOME, 'backend')
 
 /** PID file paths */
-export const PID_FILES = {
+export const PID_FILES: Record<string, string> = {
   backend: join(PIDS_DIR, 'backend.pid'),
   overlay: join(PIDS_DIR, 'overlay.pid'),
+  crawdbot: join(PIDS_DIR, 'crawdbot.pid'),
 }
 
 /** Log file paths */
-export const LOG_FILES = {
+export const LOG_FILES: Record<string, string> = {
   backend: join(LOGS_DIR, 'backend.log'),
   overlay: join(LOGS_DIR, 'overlay.log'),
+  crawdbot: join(LOGS_DIR, 'crawdbot.log'),
 }
 
 /** Default ports */

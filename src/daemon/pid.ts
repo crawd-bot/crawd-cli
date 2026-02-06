@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from '
 import { dirname } from 'path'
 import { PID_FILES, PIDS_DIR } from '../utils/paths.js'
 
-export type ProcessName = 'backend' | 'overlay'
+export type ProcessName = 'backend' | 'overlay' | 'crawdbot'
 
 /** Write a PID file */
 export function writePid(name: ProcessName, pid: number) {
@@ -93,6 +93,10 @@ export function getProcessStatus(): Record<ProcessName, { running: boolean; pid:
     overlay: {
       running: isRunning('overlay'),
       pid: readPid('overlay'),
+    },
+    crawdbot: {
+      running: isRunning('crawdbot'),
+      pid: readPid('crawdbot'),
     },
   }
 }

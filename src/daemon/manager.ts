@@ -4,7 +4,6 @@ import {
   mkdirSync,
   createWriteStream,
   cpSync,
-  readFileSync,
   writeFileSync,
 } from 'fs'
 import { join } from 'path'
@@ -16,12 +15,11 @@ import {
   BACKEND_DIR,
   BACKEND_TEMPLATE_DIR,
   CRAWD_HOME,
-  ENV_PATH,
   TTS_CACHE_DIR,
 } from '../utils/paths.js'
 import { log } from '../utils/logger.js'
 import { writePid, killProcess, isRunning, type ProcessName } from './pid.js'
-import { loadConfig } from '../config/store.js'
+import { loadConfig, loadEnv } from '../config/store.js'
 
 /** Ensure all required directories exist */
 export function ensureDirectories() {
@@ -154,31 +152,16 @@ async function installOverlayDeps(): Promise<void> {
 /** Build environment variables for child processes */
 function buildEnv(): NodeJS.ProcessEnv {
   const config = loadConfig()
+  const secrets = loadEnv()
   const env: NodeJS.ProcessEnv = { ...process.env }
 
-  // Load from .env file if exists
-  if (existsSync(ENV_PATH)) {
-    const content = readFileSync(ENV_PATH, 'utf-8')
-    for (const line of content.split('\n')) {
-      const trimmed = line.trim()
-      if (!trimmed || trimmed.startsWith('#')) continue
-      const eqIndex = trimmed.indexOf('=')
-      if (eqIndex === -1) continue
-      const key = trimmed.slice(0, eqIndex).trim()
-      let value = trimmed.slice(eqIndex + 1).trim()
-      if ((value.startsWith('"') && value.endsWith('"')) ||
-          (value.startsWith("'") && value.endsWith("'"))) {
-        value = value.slice(1, -1)
-      }
-      env[key] = value
-    }
+  // Secrets from ~/.crawd/.env
+  for (const [key, value] of Object.entries(secrets)) {
+    env[key] = value
   }
 
-  // Add config-derived values
+  // Config from ~/.crawd/config.json
   env.CRAWD_GATEWAY_URL = config.gateway.url
-  if (config.gateway.token) {
-    env.CRAWD_GATEWAY_TOKEN = config.gateway.token
-  }
   env.CRAWD_CHANNEL_ID = config.gateway.channelId
   env.CRAWD_BACKEND_PORT = String(config.ports.backend)
   env.CRAWD_OVERLAY_PORT = String(config.ports.overlay)

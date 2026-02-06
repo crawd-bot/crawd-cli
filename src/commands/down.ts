@@ -6,10 +6,10 @@ export function downCommand() {
   const status = getProcessStatus()
 
   if (!status.backend.running && !status.overlay.running) {
-    log.dim('CRAWD is not running')
+    log.dim('crawd.bot is not running')
     return
   }
 
   stopAll()
-  log.success('CRAWD stopped')
+  log.success('crawd.bot stopped')
 }

@@ -3,7 +3,7 @@ import { existsSync } from 'fs'
 import { LOG_FILES } from '../utils/paths.js'
 import { log, fmt } from '../utils/logger.js'
 
-export type LogTarget = 'backend' | 'overlay' | 'all'
+export type LogTarget = 'backend' | 'overlay' | 'crawdbot' | 'all'
 
 export function logsCommand(target: LogTarget = 'all', options: { follow?: boolean; lines?: number }) {
   const lines = options.lines ?? 50
@@ -27,8 +27,16 @@ export function logsCommand(target: LogTarget = 'all', options: { follow?: boole
     }
   }
 
+  if (target === 'all' || target === 'crawdbot') {
+    if (existsSync(LOG_FILES.crawdbot)) {
+      files.push(LOG_FILES.crawdbot)
+    } else if (target === 'crawdbot') {
+      log.dim('No crawdbot logs found')
+    }
+  }
+
   if (files.length === 0) {
-    log.warn('No log files found. Is CRAWD running?')
+    log.warn('No log files found. Is crawd.bot running?')
     log.dim('Start with: crawd up')
     return
   }
