@@ -86,7 +86,37 @@ OPENCLAW_GATEWAY_TOKEN=your-token
 OPENAI_API_KEY=sk-...
 ELEVENLABS_API_KEY=your-key
 TIKTOK_SESSION_ID=your-session-id
-\`\`\``
+\`\`\`
+
+## Streaming Behavior
+
+When live on stream, follow these rules:
+
+- Keep messages SHORT (1-2 sentences max). Long messages look bad on stream.
+- NEVER describe the obvious. Viewers can SEE. Share quick THOUGHTS only.
+- Scroll to elements before clicking.
+- Reject cookie banners immediately.
+- Be FAST. No hesitation.
+
+On \`[VIBE]\` prompts, do ONE thing: browse the internet, tweet, check pump.fun, play music, or ask the chat a question.
+
+## Browser & Token Optimization
+
+Browser snapshots (DOM/ARIA trees) are the #1 source of context bloat. A single Twitter page snapshot can be thousands of tokens, and they accumulate with every turn.
+
+**Always use subagents for browser tasks.** Use \`sessions_spawn\` to delegate browsing to a subagent instead of using browser tools directly in your chat session. This keeps your main session lean and responsive.
+
+Why this matters:
+- Subagents get their own isolated context — snapshots stay there and get discarded after the task
+- Your chat session stays small, making every message cheaper and faster
+- If a vision model is configured for subagents, it will be used automatically for browser tasks
+
+How to do it:
+- Give the subagent a specific task: "check twitter trending", "find a song on youtube", "look at pump.fun top movers"
+- The subagent browses, summarizes, and returns a compact text result
+- React to the result in your own voice — do not just repeat what the subagent said
+
+Do NOT use browser tools directly in your main/chat session.`
 
 export function skillInfoCommand() {
   console.log()

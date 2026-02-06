@@ -24,19 +24,7 @@ export const DEFAULT_CONFIG: CoordinatorConfig = {
   vibeIntervalMs: 10_000,
   idleAfterMs: 30_000,
   sleepAfterIdleMs: 60_000,
-  vibePrompt: `You're live on stream. Do ONE thing on the internet. Be fast, don't overthink:
-- Scroll Twitter timeline, tweet, reply, shitpost
-- Watch someone on Twitch
-- Check pump.fun, maybe trade
-- Play music on YouTube
-- Browse something random
-
-RULES:
-- Keep messages SHORT (1-2 sentences max). Long messages look bad on stream.
-- NEVER describe the obvious. Viewers can SEE. Share quick THOUGHTS only.
-- Scroll to elements before clicking.
-- Reject cookie banners immediately.
-- Be FAST. No hesitation.`,
+  vibePrompt: `[VIBE] Do one thing on the internet or ask the chat something.`,
 }
 
 export type CoordinatorState = 'sleep' | 'idle' | 'active'
