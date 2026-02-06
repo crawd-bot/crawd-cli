@@ -4,18 +4,22 @@ import { Command } from 'commander'
 import { authCommand, authForceCommand } from './commands/auth.js'
 import { streamStartCommand, streamStopCommand } from './commands/stream.js'
 import { statusCommand } from './commands/status.js'
-import { skillInstallCommand } from './commands/skill.js'
+import { skillInfoCommand, skillShowCommand, skillInstallCommand } from './commands/skill.js'
 import { startCommand } from './commands/start.js'
 import { stopCommand } from './commands/stop.js'
 import { updateCommand } from './commands/update.js'
+import { talkCommand } from './commands/talk.js'
+import { logsCommand } from './commands/logs.js'
 import { configShowCommand, configGetCommand, configSetCommand } from './commands/config.js'
+
+const VERSION = '0.2.0'
 
 const program = new Command()
 
 program
   .name('crawd')
   .description('CLI for crawd.bot - AI agent livestreaming platform')
-  .version('0.1.0')
+  .version(VERSION, '-v, --version')
 
 // crawd auth
 program
@@ -24,10 +28,18 @@ program
   .option('-f, --force', 'Re-authenticate even if already logged in')
   .action((opts) => opts.force ? authForceCommand() : authCommand())
 
-// crawd skill install
-program
+// crawd skill
+const skillCmd = program
   .command('skill')
-  .description('Manage skills')
+  .description('Skill reference and management')
+  .action(skillInfoCommand)
+
+skillCmd
+  .command('show')
+  .description('Print the full skill reference')
+  .action(skillShowCommand)
+
+skillCmd
   .command('install')
   .description('Install the livestream skill')
   .action(skillInstallCommand)
@@ -50,13 +62,13 @@ streamCmd
 // crawd start
 program
   .command('start')
-  .description('Start the CrawdBot backend daemon')
+  .description('Start the backend daemon')
   .action(startCommand)
 
 // crawd stop
 program
   .command('stop')
-  .description('Stop the CrawdBot backend daemon')
+  .description('Stop the backend daemon')
   .action(stopCommand)
 
 // crawd update
@@ -68,8 +80,24 @@ program
 // crawd status
 program
   .command('status')
-  .description('Show your stream status')
+  .description('Show stream and daemon status')
   .action(statusCommand)
+
+// crawd talk
+program
+  .command('talk <message>')
+  .description('Send a message to the overlay with TTS')
+  .action((message: string) => talkCommand(message))
+
+// crawd logs
+program
+  .command('logs')
+  .description('Tail backend daemon logs')
+  .option('-n, --lines <n>', 'Number of lines', '50')
+  .option('--no-follow', 'Print logs and exit')
+  .action((opts: { lines: string; follow: boolean }) => {
+    logsCommand({ lines: parseInt(opts.lines, 10), follow: opts.follow })
+  })
 
 // crawd config
 const configCmd = program
@@ -91,9 +119,21 @@ configCmd
   .description('Set a config value by dot-path')
   .action(configSetCommand)
 
-// Default action: show status
+// crawd version (explicit subcommand)
+program
+  .command('version')
+  .description('Show CLI version')
+  .action(() => console.log(VERSION))
+
+// crawd help (explicit subcommand)
+program
+  .command('help')
+  .description('Show help')
+  .action(() => program.help())
+
+// Default: show help when no command given
 program.action(() => {
-  statusCommand()
+  program.help()
 })
 
 program.parse()

@@ -20,9 +20,12 @@ export const ConfigSchema = z.object({
   tts: z.object({
     /** Provider for reading chat messages aloud */
     chatProvider: ttsProviderEnum.default('tiktok'),
+    /** Voice ID for chat TTS (must match chatProvider) */
+    chatVoice: z.string().default('en_us_002'),
     /** Provider for bot speech */
     botProvider: ttsProviderEnum.default('elevenlabs'),
-    voice: z.string().optional(),
+    /** Voice ID for bot TTS (must match botProvider) */
+    botVoice: z.string().default('TX3LPaxmHKxFdv7VOQHJ'),
   }).default({}),
 
   /** Chat platform configuration */

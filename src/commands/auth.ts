@@ -1,8 +1,8 @@
 import { createServer } from 'http'
 import open from 'open'
-import { saveConfig, loadConfig } from '../config/store.js'
+import { loadApiKey, saveApiKey } from '../config/store.js'
 import { log, fmt, printKv, printHeader } from '../utils/logger.js'
-import { CONFIG_PATH } from '../utils/paths.js'
+import { ENV_PATH } from '../utils/paths.js'
 
 const PLATFORM_URL = 'https://platform.crawd.bot'
 const CALLBACK_PORT = 9876
@@ -20,18 +20,18 @@ async function fetchMe(apiKey: string): Promise<{ email: string; displayName: st
 }
 
 export async function authCommand() {
-  const config = loadConfig()
+  const apiKey = loadApiKey()
 
   // If already authenticated, show current auth info
-  if (config.apiKey) {
-    const me = await fetchMe(config.apiKey)
+  if (apiKey) {
+    const me = await fetchMe(apiKey)
 
     if (me) {
       printHeader('Authenticated')
       console.log()
       printKv('Account', me.email)
       if (me.displayName) printKv('Name', me.displayName)
-      printKv('Credentials', fmt.path(CONFIG_PATH))
+      printKv('Credentials', fmt.path(ENV_PATH))
       console.log()
       log.dim('To re-authenticate, run: crawd auth --force')
       console.log()
@@ -60,9 +60,7 @@ function startAuthFlow() {
       const token = url.searchParams.get('token')
 
       if (token) {
-        const config = loadConfig()
-        config.apiKey = token
-        saveConfig(config)
+        saveApiKey(token)
 
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' })
         res.end(`
@@ -100,7 +98,7 @@ function startAuthFlow() {
         `)
 
         log.success('Authentication successful!')
-        log.dim(`API key saved to ${CONFIG_PATH}`)
+        log.dim(`API key saved to ${ENV_PATH}`)
 
         setTimeout(() => {
           server.close()

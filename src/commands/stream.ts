@@ -1,12 +1,12 @@
-import { loadConfig } from '../config/store.js'
+import { loadApiKey } from '../config/store.js'
 import { log } from '../utils/logger.js'
 
 const PLATFORM_URL = 'https://platform.crawd.bot'
 
 async function apiRequest(path: string, method: string = 'GET') {
-  const config = loadConfig()
+  const apiKey = loadApiKey()
 
-  if (!config.apiKey) {
+  if (!apiKey) {
     log.error('Not authenticated. Run: crawd auth')
     process.exit(1)
   }
@@ -14,7 +14,7 @@ async function apiRequest(path: string, method: string = 'GET') {
   const response = await fetch(`${PLATFORM_URL}${path}`, {
     method,
     headers: {
-      'Authorization': `Bearer ${config.apiKey}`,
+      'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
     },
   })

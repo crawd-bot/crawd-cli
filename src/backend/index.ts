@@ -48,7 +48,9 @@ const TTS_DIR = join(process.cwd(), "tmp", "tts");
 
 // TTS provider selection from config (passed as env vars by `crawd start`)
 const CHAT_PROVIDER = (process.env.TTS_CHAT_PROVIDER || 'tiktok') as TtsProvider;
+const CHAT_VOICE = process.env.TTS_CHAT_VOICE;
 const BOT_PROVIDER = (process.env.TTS_BOT_PROVIDER || 'elevenlabs') as TtsProvider;
+const BOT_VOICE = process.env.TTS_BOT_VOICE;
 
 // Unique version ID generated at startup - changes on each deploy/restart
 const BUILD_VERSION = randomUUID();
@@ -74,10 +76,10 @@ if (process.env.TIKTOK_SESSION_ID) {
 
 // --- TTS provider functions ---
 
-async function generateOpenAITTS(text: string): Promise<string> {
+async function generateOpenAITTS(text: string, voice?: string): Promise<string> {
   const response = await openai.audio.speech.create({
     model: "tts-1-hd",
-    voice: "onyx",
+    voice: (voice || "onyx") as "onyx",
     input: text,
   });
 
@@ -89,10 +91,10 @@ async function generateOpenAITTS(text: string): Promise<string> {
   return `${BACKEND_URL}/tts/${filename}`;
 }
 
-async function generateElevenLabsTTS(text: string): Promise<string> {
+async function generateElevenLabsTTS(text: string, voice?: string): Promise<string> {
   if (!elevenlabs) throw new Error("ELEVENLABS_API_KEY not configured");
 
-  const audio = await elevenlabs.textToSpeech.convert("TX3LPaxmHKxFdv7VOQHJ", {
+  const audio = await elevenlabs.textToSpeech.convert(voice || "TX3LPaxmHKxFdv7VOQHJ", {
     modelId: "eleven_multilingual_v2",
     text,
     outputFormat: "mp3_44100_128",
@@ -128,8 +130,8 @@ async function generateElevenLabsTTS(text: string): Promise<string> {
   return `${BACKEND_URL}/tts/${filename}`;
 }
 
-async function generateTikTokTTSFile(text: string): Promise<string> {
-  const buffer = await generateTikTokTTS(text);
+async function generateTikTokTTSFile(text: string, voice?: string): Promise<string> {
+  const buffer = await generateTikTokTTS(text, voice);
   const filename = `${randomUUID()}.mp3`;
   await mkdir(TTS_DIR, { recursive: true });
   await writeFile(join(TTS_DIR, filename), buffer);
@@ -137,12 +139,12 @@ async function generateTikTokTTSFile(text: string): Promise<string> {
   return `${BACKEND_URL}/tts/${filename}`;
 }
 
-/** Generate TTS using the specified provider, falling back to OpenAI on failure */
-async function tts(text: string, provider: TtsProvider): Promise<string> {
+/** Generate TTS using the specified provider and voice, falling back to OpenAI on failure */
+async function tts(text: string, provider: TtsProvider, voice?: string): Promise<string> {
   const providers: Record<TtsProvider, () => Promise<string>> = {
-    openai: () => generateOpenAITTS(text),
-    elevenlabs: () => generateElevenLabsTTS(text),
-    tiktok: () => generateTikTokTTSFile(text),
+    openai: () => generateOpenAITTS(text, voice),
+    elevenlabs: () => generateElevenLabsTTS(text, voice),
+    tiktok: () => generateTikTokTTSFile(text, voice),
   };
 
   try {
@@ -157,10 +159,10 @@ async function tts(text: string, provider: TtsProvider): Promise<string> {
 }
 
 /** Generate TTS for a chat message (uses CHAT_PROVIDER) */
-const chatTTS = (text: string) => tts(text, CHAT_PROVIDER);
+const chatTTS = (text: string) => tts(text, CHAT_PROVIDER, CHAT_VOICE);
 
 /** Generate TTS for a bot message (uses BOT_PROVIDER) */
-const botTTS = (text: string) => tts(text, BOT_PROVIDER);
+const botTTS = (text: string) => tts(text, BOT_PROVIDER, BOT_VOICE);
 
 // --- Non-TTS helpers ---
 

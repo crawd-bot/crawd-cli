@@ -11,12 +11,14 @@ import type { Config } from '../config/schema.js'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
-/** Resolve the backend entry point (src/backend/index.ts relative to this file) */
+/** Resolve the backend entry point (src/backend/index.ts relative to package root) */
 function getBackendEntry(): string {
+  // From src/commands/ (dev with tsx)
   const fromSrc = join(__dirname, '..', 'backend', 'index.ts')
   if (existsSync(fromSrc)) return fromSrc
 
-  const fromDist = join(__dirname, '..', '..', 'src', 'backend', 'index.ts')
+  // From dist/ (built cli.js)
+  const fromDist = join(__dirname, '..', 'src', 'backend', 'index.ts')
   if (existsSync(fromDist)) return fromDist
 
   throw new Error('Backend entry point not found')
@@ -38,7 +40,9 @@ function buildEnv(config: Config): NodeJS.ProcessEnv {
   env.OPENCLAW_GATEWAY_URL = config.gateway.url
   env.CRAWD_CHANNEL_ID = config.gateway.channelId
   env.TTS_CHAT_PROVIDER = config.tts.chatProvider
+  env.TTS_CHAT_VOICE = config.tts.chatVoice
   env.TTS_BOT_PROVIDER = config.tts.botProvider
+  env.TTS_BOT_VOICE = config.tts.botVoice
   if (config.chat.pumpfun) {
     env.PUMPFUN_ENABLED = String(config.chat.pumpfun.enabled)
     if (config.chat.pumpfun.tokenMint) {
@@ -55,7 +59,9 @@ function buildEnv(config: Config): NodeJS.ProcessEnv {
 
 export async function startCommand() {
   if (isRunning('crawdbot')) {
-    log.warn('CrawdBot backend is already running')
+    const config = loadConfig()
+    log.warn('Backend is already running')
+    printKv('Backend', fmt.url(`http://localhost:${config.ports.backend}`))
     log.dim('Use `crawd stop` to stop it first')
     return
   }

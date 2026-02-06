@@ -93,6 +93,31 @@ export function saveEnv(env: Record<string, string>) {
   writeFileSync(ENV_PATH, lines.join('\n') + '\n')
 }
 
+/** Load API key from ~/.crawd/.env */
+export function loadApiKey(): string | null {
+  const env = loadEnv()
+  return env.CRAWD_API_KEY ?? null
+}
+
+/** Known .env keys — included with empty defaults so users can see what's available */
+const ENV_TEMPLATE_KEYS = [
+  'CRAWD_API_KEY',
+  'OPENAI_API_KEY',
+  'ELEVENLABS_API_KEY',
+  'TIKTOK_SESSION_ID',
+  'OPENCLAW_GATEWAY_TOKEN',
+]
+
+/** Save API key to ~/.crawd/.env, seeding empty placeholders for known keys */
+export function saveApiKey(apiKey: string) {
+  const env = loadEnv()
+  for (const key of ENV_TEMPLATE_KEYS) {
+    if (!(key in env)) env[key] = ''
+  }
+  env.CRAWD_API_KEY = apiKey
+  saveEnv(env)
+}
+
 // Helper functions
 
 function deepMerge<T extends Record<string, unknown>>(

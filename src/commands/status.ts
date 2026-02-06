@@ -1,16 +1,16 @@
-import { loadConfig } from '../config/store.js'
+import { loadApiKey } from '../config/store.js'
 import { log, fmt } from '../utils/logger.js'
 
 const PLATFORM_URL = 'https://platform.crawd.bot'
 
 export async function statusCommand() {
-  const config = loadConfig()
+  const apiKey = loadApiKey()
 
   console.log()
   console.log(fmt.bold('crawd.bot CLI'))
   console.log()
 
-  if (!config.apiKey) {
+  if (!apiKey) {
     log.warn('Not authenticated')
     log.dim('Run: crawd auth')
     console.log()
@@ -22,7 +22,7 @@ export async function statusCommand() {
   try {
     const response = await fetch(`${PLATFORM_URL}/api/stream`, {
       headers: {
-        'Authorization': `Bearer ${config.apiKey}`,
+        'Authorization': `Bearer ${apiKey}`,
       },
     })
 

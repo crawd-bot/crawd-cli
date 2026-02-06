@@ -29,13 +29,14 @@ pnpm add -g @crawd/cli
 # 1. Login to crawd.bot
 crawd auth
 
-# 2. Add your API keys to ~/.crawd/.env
-ELEVENLABS_API_KEY=your-key
-OPENAI_API_KEY=sk-...
+# 2. Add your gateway token and API keys to ~/.crawd/.env
+#    (crawd auth creates the file with empty placeholders)
 
-# 3. Configure TTS providers
+# 3. Configure TTS providers and voices
 crawd config set tts.chatProvider tiktok
+crawd config set tts.chatVoice en_us_002
 crawd config set tts.botProvider elevenlabs
+crawd config set tts.botVoice TX3LPaxmHKxFdv7VOQHJ
 
 # 4. Start the backend daemon
 crawd start
@@ -51,23 +52,30 @@ crawd stream start
 | `crawd start` | Start the backend daemon |
 | `crawd stop` | Stop the backend daemon |
 | `crawd update` | Update CLI and restart daemon |
+| `crawd talk <message>` | Send a message to the overlay with TTS |
 | `crawd stream start` | Set your stream to live |
 | `crawd stream stop` | Set your stream to offline |
-| `crawd status` | Show status |
-| `crawd logs` | Tail daemon logs |
+| `crawd status` | Show stream and daemon status |
+| `crawd logs` | Tail backend daemon logs |
 | `crawd auth` | Login to crawd.bot |
 | `crawd config show` | Show all configuration |
 | `crawd config get <path>` | Get a config value |
 | `crawd config set <path> <value>` | Set a config value |
+| `crawd skill show` | Print the full skill reference |
+| `crawd skill install` | Install the livestream skill |
+| `crawd version` | Show CLI version |
+| `crawd help` | Show help |
 
 ## Configuration
 
 Config lives in `~/.crawd/config.json`, secrets in `~/.crawd/.env`.
 
 ```bash
-# TTS providers (per message type)
-crawd config set tts.chatProvider tiktok       # tiktok, openai, or elevenlabs
-crawd config set tts.botProvider elevenlabs    # elevenlabs, openai, or tiktok
+# TTS providers and voices (per role)
+crawd config set tts.chatProvider tiktok
+crawd config set tts.chatVoice en_us_002
+crawd config set tts.botProvider elevenlabs
+crawd config set tts.botVoice TX3LPaxmHKxFdv7VOQHJ
 
 # Gateway
 crawd config set gateway.url ws://localhost:18789
@@ -75,6 +83,13 @@ crawd config set gateway.url ws://localhost:18789
 # Backend port
 crawd config set ports.backend 4000
 ```
+
+Available providers: `tiktok`, `openai`, `elevenlabs`. Each role (chat/bot) has its own provider and voice, so you can use the same provider with different voices for each.
+
+Voice ID references:
+- [OpenAI TTS voices](https://platform.openai.com/docs/guides/text-to-speech)
+- [ElevenLabs voice library](https://elevenlabs.io/voice-library)
+- TikTok voices: use voice codes like `en_us_002`, `en_us_006`, `en_us_010`
 
 Secrets (`~/.crawd/.env`):
 
@@ -85,22 +100,33 @@ ELEVENLABS_API_KEY=your-key
 TIKTOK_SESSION_ID=your-session-id
 ```
 
-## API Reference
-
 ### Talk
 
+Send a message to connected overlays with TTS:
+
 ```bash
-curl -X POST http://localhost:4000/crawd/talk \
-  -H "Content-Type: application/json" \
-  -d '{"message": "Hello world!", "replyTo": "optional quote"}'
+crawd talk "Hello everyone!"
 ```
 
-## Typed Events
+## Overlay
 
-Install the package in your overlay project for type-safe WebSocket events:
+The overlay is a separate web app that connects to the backend daemon over WebSocket and renders the stream UI (chat bubbles, avatar, TTS audio). We encourage you to build your own custom overlay.
+
+Start by cloning the example overlay:
 
 ```bash
-pnpm add -D @crawd/cli
+git clone https://github.com/crawd-bot/crawd-overlay-example
+cd crawd-overlay-example
+pnpm install
+pnpm dev
+```
+
+The example overlay comes pre-configured to connect to `localhost:4000` (the default backend port). Add it as a browser source in OBS.
+
+Install `@crawd/cli` in your overlay project for type-safe event handling:
+
+```bash
+pnpm add @crawd/cli
 ```
 
 ```ts
