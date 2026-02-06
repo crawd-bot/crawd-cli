@@ -12,13 +12,13 @@ import { pumpfun } from "../lib/pumpfun/v2";
 import { ChatManager } from "../lib/chat/manager";
 import { PumpFunChatClient } from "../lib/chat/pumpfun/client";
 import { YouTubeChatClient } from "../lib/chat/youtube/client";
-import { Coordinator, type AgentReply, type CoordinatorConfig, type CoordinatorEvent } from "./coordinator";
+import { Coordinator, type CoordinatorConfig, type CoordinatorEvent, type InvokeRequestPayload } from "./coordinator";
 import { generateShortId } from "../lib/chat/types";
 import { configureTikTokTTS, generateTikTokTTS } from "../lib/tts/tiktok";
 import type { ChatMessage } from "../lib/chat/types";
 import { loadEnv, loadConfig } from "../config/store.js";
 import { ENV_PATH, CONFIG_PATH } from "../utils/paths.js";
-import type { TtsProvider, ReplyTurnEvent } from "../types";
+import type { TtsProvider, ReplyTurnEvent, TalkEvent } from "../types";
 
 // Parse coordinator config from env vars
 function parseCoordinatorConfig(): Partial<CoordinatorConfig> {
@@ -265,6 +265,30 @@ async function main() {
     io.emit("crawd:mcap", { mcap });
   }
 
+  // --- Pending talk ack tracking (for synchronous talk tool calls) ---
+  const pendingTalkAcks = new Map<string, { resolve: () => void; timer: ReturnType<typeof setTimeout> }>();
+  const TALK_ACK_TIMEOUT_MS = 60_000;
+
+  function waitForTalkAck(talkId: string): Promise<void> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        pendingTalkAcks.delete(talkId);
+        fastify.log.warn({ talkId }, 'Talk ack timed out, resolving anyway');
+        resolve();
+      }, TALK_ACK_TIMEOUT_MS);
+      pendingTalkAcks.set(talkId, { resolve, timer });
+    });
+  }
+
+  function resolveTalkAck(talkId: string) {
+    const pending = pendingTalkAcks.get(talkId);
+    if (pending) {
+      clearTimeout(pending.timer);
+      pendingTalkAcks.delete(talkId);
+      pending.resolve();
+    }
+  }
+
   // Chat manager and coordinator instances
   let chatManager: ChatManager | null = null;
   let coordinator: Coordinator | null = null;
@@ -318,72 +342,64 @@ async function main() {
         }
       });
 
-      // Filter out technical error messages that shouldn't be voiced
-      const shouldSkipMessage = (text: string): boolean => {
-        const normalized = text.trim().toLowerCase();
-        if (normalized.length < 2) return true;
-        if (normalized === 'none') return true;
-        if (/^\d{3}\s*(status|error|code)/i.test(text)) return true;
-        if (/status\s*code.*\d{3}/i.test(text)) return true;
-        if (/^\(no\s*body\)$/i.test(normalized)) return true;
-        return false;
-      };
+      /** Generate TTS and emit atomic talk event, wait for overlay ack */
+      async function handleTalkInvoke(text: string): Promise<void> {
+        const talkId = randomUUID();
+        fastify.log.info({ talkId, text }, 'Handling talk invoke');
 
-      // When agent replies, emit appropriate event
-      coordinator.setOnAgentReply(async (reply: AgentReply) => {
-        const { text, replyTo, originalMessage } = reply;
-        fastify.log.info({ text, replyTo, hasOriginal: !!originalMessage }, 'Agent replied');
+        const ttsUrl = await botTTS(text);
 
-        if (shouldSkipMessage(text)) {
-          fastify.log.info({ text }, 'Skipping technical/error message');
-          return;
-        }
+        const event: TalkEvent = { id: talkId, message: text, ttsUrl };
+        io.emit('crawd:talk', event);
+        fastify.log.info({ talkId, ttsUrl }, 'Emitted crawd:talk, waiting for ack');
 
-        if (originalMessage) {
-          // Reply to chat message — turn-based flow
-          fastify.log.info({ username: originalMessage.username }, 'Generating turn with both TTS files');
-
-          try {
-            const [chatTtsUrl, botTtsUrl] = await Promise.all([
-              chatTTS(`Chat says: ${originalMessage.message}`),
-              botTTS(text),
-            ]);
-
-            const event: ReplyTurnEvent = {
-              chat: { username: originalMessage.username, message: originalMessage.message },
-              botMessage: text,
-              chatTtsUrl,
-              botTtsUrl,
-            };
-
-            fastify.log.info({ chatTtsUrl, botTtsUrl }, 'Emitting crawd:reply-turn');
-            io.emit('crawd:reply-turn', event);
-          } catch (e) {
-            fastify.log.error(e, 'Failed to generate TTS for reply turn, falling back to talk');
-            io.emit('crawd:talk', { message: text, replyTo });
-            botTTS(text)
-              .then((ttsUrl) => io.emit('crawd:tts', { ttsUrl }))
-              .catch((err) => fastify.log.error(err, 'Failed to generate fallback TTS'));
-          }
-        } else {
-          // Vibe/spontaneous message
-          fastify.log.info({ message: text }, 'Emitting crawd:talk (vibe)');
-          io.emit('crawd:talk', { message: text, replyTo: null });
-
-          botTTS(text)
-            .then((ttsUrl) => {
-              fastify.log.info({ ttsUrl }, 'TTS generated for vibe');
-              io.emit('crawd:tts', { ttsUrl });
-            })
-            .catch((e) => {
-              fastify.log.error(e, 'failed to generate TTS for vibe');
-            });
-        }
-      });
+        await waitForTalkAck(talkId);
+        fastify.log.info({ talkId }, 'Talk complete');
+      }
 
       try {
         await coordinator.start();
         fastify.log.info('Coordinator connected to gateway');
+
+        // Register invoke handler on gateway client for the talk command
+        const gateway = coordinator.getGateway();
+        if (gateway) {
+          gateway.onInvokeRequest = async (payload: InvokeRequestPayload) => {
+            fastify.log.info({ command: payload.command, id: payload.id }, 'Invoke request received');
+
+            if (payload.command === 'talk') {
+              try {
+                const params = payload.paramsJSON ? JSON.parse(payload.paramsJSON) : {};
+                const text = params.text;
+                if (!text || typeof text !== 'string') {
+                  await gateway.sendInvokeResult(payload.id, payload.nodeId, {
+                    ok: false,
+                    error: { code: 'INVALID_PARAMS', message: 'text parameter is required' },
+                  });
+                  return;
+                }
+
+                await handleTalkInvoke(text);
+                await gateway.sendInvokeResult(payload.id, payload.nodeId, {
+                  ok: true,
+                  payload: { spoken: true },
+                });
+              } catch (err) {
+                fastify.log.error(err, 'Talk invoke failed');
+                await gateway.sendInvokeResult(payload.id, payload.nodeId, {
+                  ok: false,
+                  error: { code: 'TTS_FAILED', message: String(err) },
+                });
+              }
+            } else {
+              fastify.log.warn({ command: payload.command }, 'Unknown invoke command');
+              await gateway.sendInvokeResult(payload.id, payload.nodeId, {
+                ok: false,
+                error: { code: 'UNKNOWN_COMMAND', message: `Unknown command: ${payload.command}` },
+              });
+            }
+          };
+        }
       } catch (err) {
         fastify.log.error(err, 'Failed to connect coordinator to gateway');
         coordinator = null;
@@ -403,31 +419,37 @@ async function main() {
       socket.emit("crawd:mcap", { mcap: latestMcap });
     }
 
+    // Listen for talk:done acks from overlay
+    socket.on("crawd:talk:done", (data: { id: string }) => {
+      if (data?.id) {
+        fastify.log.info({ talkId: data.id }, 'Talk ack received from overlay');
+        resolveTalkAck(data.id);
+      }
+    });
+
     socket.on("disconnect", () => {
       fastify.log.info(`socket disconnected: ${socket.id}`);
     });
   });
 
-  fastify.post<{ Body: { message: string; replyTo?: string } }>(
+  fastify.post<{ Body: { message: string } }>(
     "/crawd/talk",
     async (request, reply) => {
-      const { message, replyTo } = request.body;
+      const { message } = request.body;
       if (!message || typeof message !== "string") {
         return reply.status(400).send({ error: "message is required" });
       }
 
-      io.emit("crawd:talk", { message, replyTo: replyTo ?? null });
-
-      botTTS(message)
-        .then((ttsUrl) => {
-          fastify.log.info({ ttsUrl }, "TTS generated, emitting crawd:tts");
-          io.emit("crawd:tts", { ttsUrl });
-        })
-        .catch((e) => {
-          fastify.log.error(e, "failed to generate TTS");
-        });
-
-      return { ok: true };
+      try {
+        const talkId = randomUUID();
+        const ttsUrl = await botTTS(message);
+        const event: TalkEvent = { id: talkId, message, ttsUrl };
+        io.emit("crawd:talk", event);
+        return { ok: true, id: talkId };
+      } catch (e) {
+        fastify.log.error(e, "failed to generate TTS");
+        return reply.status(500).send({ error: "Failed to generate TTS" });
+      }
     }
   );
 

@@ -25,7 +25,7 @@ import { io, type Socket } from 'socket.io-client'
 import type {
   ReplyTurnEvent,
   TalkEvent,
-  TtsEvent,
+  TalkDoneEvent,
   StatusEvent,
   McapEvent,
 } from './types'
@@ -33,11 +33,14 @@ import type {
 export type CrawdClientEvents = {
   'reply-turn': (data: ReplyTurnEvent) => void
   'talk': (data: TalkEvent) => void
-  'tts': (data: TtsEvent) => void
   'status': (data: StatusEvent) => void
   'mcap': (data: McapEvent) => void
   'connect': () => void
   'disconnect': () => void
+}
+
+export type CrawdEmitEvents = {
+  'talk:done': TalkDoneEvent
 }
 
 export type CrawdClient = {
@@ -45,6 +48,8 @@ export type CrawdClient = {
   on: <K extends keyof CrawdClientEvents>(event: K, handler: CrawdClientEvents[K]) => void
   /** Remove an event listener */
   off: <K extends keyof CrawdClientEvents>(event: K, handler: CrawdClientEvents[K]) => void
+  /** Send an event to the backend */
+  emit: <K extends keyof CrawdEmitEvents>(event: K, data: CrawdEmitEvents[K]) => void
   /** Disconnect and clean up */
   destroy: () => void
   /** Underlying socket.io instance (escape hatch) */
@@ -57,7 +62,7 @@ export function createCrawdClient(url: string): CrawdClient {
   const eventMap: Record<string, string> = {
     'reply-turn': 'crawd:reply-turn',
     'talk': 'crawd:talk',
-    'tts': 'crawd:tts',
+    'talk:done': 'crawd:talk:done',
     'status': 'crawd:status',
     'mcap': 'crawd:mcap',
   }
@@ -80,9 +85,14 @@ export function createCrawdClient(url: string): CrawdClient {
     }
   }
 
+  function emit<K extends keyof CrawdEmitEvents>(event: K, data: CrawdEmitEvents[K]) {
+    const socketEvent = eventMap[event as string] ?? event
+    socket.emit(socketEvent, data)
+  }
+
   function destroy() {
     socket.disconnect()
   }
 
-  return { on, off, destroy, socket }
+  return { on, off, emit, destroy, socket }
 }

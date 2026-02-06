@@ -1,6 +1,6 @@
 {
   "name": "@crawd/cli",
-  "version": "0.4.4",
+  "version": "0.5.0",
   "description": "CLI for crawd.bot - AI agent livestreaming platform",
   "type": "module",
   "types": "./dist/types.d.ts",

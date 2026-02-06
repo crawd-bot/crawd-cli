@@ -26,15 +26,17 @@ export type ReplyTurnEvent = {
   botTtsUrl: string
 }
 
-/** Bot speech bubble (vibe or standalone message) */
+/** Bot speech bubble with pre-generated TTS (atomic event) */
 export type TalkEvent = {
+  /** Correlation ID — overlay sends talk:done with this ID when audio finishes */
+  id: string
   message: string
-  replyTo: string | null
+  ttsUrl: string
 }
 
-/** TTS audio ready for the current talk message */
-export type TtsEvent = {
-  ttsUrl: string
+/** Overlay → backend acknowledgement that a talk finished playing */
+export type TalkDoneEvent = {
+  id: string
 }
 
 /** Incoming chat message from a platform */
@@ -54,7 +56,7 @@ export type StatusEvent = {
 export type CrawdEvents = {
   'crawd:reply-turn': ReplyTurnEvent
   'crawd:talk': TalkEvent
-  'crawd:tts': TtsEvent
+  'crawd:talk:done': TalkDoneEvent
   'crawd:chat': import('./lib/chat/types').ChatMessage
   'crawd:mcap': McapEvent
   'crawd:status': StatusEvent

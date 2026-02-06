@@ -38,6 +38,15 @@ export type AgentReply = {
   originalMessage: ChatMessage | null
 }
 
+/** Payload for a node.invoke.request event from the gateway */
+export type InvokeRequestPayload = {
+  id: string
+  nodeId: string
+  command: string
+  paramsJSON?: string | null
+  timeoutMs?: number
+}
+
 /** Interface for gateway client (allows mocking in tests) */
 export interface IGatewayClient {
   connect(): Promise<void>
@@ -45,6 +54,8 @@ export interface IGatewayClient {
   isConnected(): boolean
   isSessionBusy(): boolean
   triggerAgent(message: string): Promise<string[]>
+  sendInvokeResult(id: string, nodeId: string, result: { ok: boolean; payload?: unknown; error?: { code: string; message: string } }): Promise<void>
+  onInvokeRequest?: (payload: InvokeRequestPayload) => void
 }
 
 /** Clock interface for time control in tests */
@@ -98,6 +109,9 @@ export class GatewayClient implements IGatewayClient {
   private reconnectDelay = 1000
   private readonly maxReconnectDelay = 30_000
   private shouldReconnect = false
+
+  /** Callback invoked when the gateway dispatches a node.invoke.request */
+  onInvokeRequest?: (payload: InvokeRequestPayload) => void
 
   constructor(url: string, token: string, sessionKey: string = SESSION_KEY) {
     this.url = url
@@ -177,6 +191,7 @@ export class GatewayClient implements IGatewayClient {
         platform: 'node',
         mode: 'backend',
       },
+      commands: ['talk'],
       auth: { token: this.token },
     }, true) as Promise<void>
   }
@@ -188,6 +203,18 @@ export class GatewayClient implements IGatewayClient {
       const eventType = (frame as any).event
       if (eventType !== 'health' && eventType !== 'presence') {
         console.log('[Gateway] Frame received:', JSON.stringify(frame))
+      }
+    }
+
+    // Handle node.invoke.request events from gateway
+    if (frame.type === 'event') {
+      const eventType = (frame as any).event
+      if (eventType === 'node.invoke.request' && this.onInvokeRequest) {
+        const payload = (frame as any).payload as InvokeRequestPayload
+        if (payload?.id && payload?.command) {
+          this.onInvokeRequest(payload)
+        }
+        return
       }
     }
 
@@ -299,6 +326,17 @@ export class GatewayClient implements IGatewayClient {
     return this.activeRunIds.size > 0
   }
 
+  async sendInvokeResult(
+    id: string,
+    nodeId: string,
+    result: { ok: boolean; payload?: unknown; error?: { code: string; message: string } }
+  ): Promise<void> {
+    const params: Record<string, unknown> = { id, nodeId, ok: result.ok }
+    if (result.payload !== undefined) params.payload = result.payload
+    if (result.error) params.error = result.error
+    await this.request('node.invoke.result', params)
+  }
+
   disconnect(): void {
     this.shouldReconnect = false
     if (this.reconnectTimer) {
@@ -342,10 +380,7 @@ export class Coordinator {
   private gateway: IGatewayClient | null = null
   private gatewayUrl: string
   private gatewayToken: string
-  private onAgentReply?: (reply: AgentReply) => void
   private onEvent?: (event: CoordinatorEvent) => void
-  /** Map of shortId -> message for current batch (used to resolve reply references) */
-  private currentBatchMessages = new Map<string, ChatMessage>()
   /** Timestamp when coordinator was created (used to filter old messages on restart) */
   private readonly startedAt: number
 
@@ -407,9 +442,9 @@ export class Coordinator {
     }
   }
 
-  /** Set callback for when agent replies to chat */
-  setOnAgentReply(callback: (reply: AgentReply) => void): void {
-    this.onAgentReply = callback
+  /** Get the underlying gateway client (for registering invoke handlers) */
+  getGateway(): IGatewayClient | null {
+    return this.gateway
   }
 
   /** Set callback for coordinator events (useful for debugging/testing) */
@@ -589,14 +624,8 @@ export class Coordinator {
     this.resetActivity()
 
     try {
-      const replies = await this.gateway.triggerAgent(this.config.vibePrompt)
-
-      // Forward vibe replies to callback (they won't have replyTo since not from chat)
-      if (this.onAgentReply) {
-        for (const text of replies) {
-          this.onAgentReply({ text, replyTo: null, originalMessage: null })
-        }
-      }
+      // Agent handles its own speech via the talk tool
+      await this.gateway.triggerAgent(this.config.vibePrompt)
     } catch (err) {
       this.logger.error('[Coordinator] Vibe failed:', err)
     }
@@ -651,10 +680,6 @@ export class Coordinator {
     if (this.buffer.length === 0) return
 
     const batch = this.buffer.splice(0)
-
-    // Store messages by shortId for resolving reply references
-    this.currentBatchMessages = new Map(batch.map(m => [m.shortId, m]))
-
     const batchText = this.formatBatch(batch)
 
     this.logger.log(`[Coordinator] Flushing ${batch.length} messages`)
@@ -666,42 +691,12 @@ export class Coordinator {
     }
 
     try {
-      const replies = await this.gateway.triggerAgent(batchText)
-
-      // Parse and forward each agent reply to callback
-      if (this.onAgentReply) {
-        for (const rawReply of replies) {
-          const reply = this.parseReply(rawReply)
-          this.onAgentReply(reply)
-        }
-      }
+      // Agent handles its own speech via the talk tool
+      await this.gateway.triggerAgent(batchText)
     } catch (err) {
       // Log and continue - don't retry, next batch will work if gateway recovers
       this.logger.error('[Coordinator] Failed to trigger agent:', err)
     }
-  }
-
-  /**
-   * Parse agent reply for message reference.
-   * Format: "[shortId] reply text" or just "reply text"
-   */
-  parseReply(rawReply: string): AgentReply {
-    // Match [shortId] at start of reply (6 alphanumeric chars)
-    const match = rawReply.match(/^\[([a-zA-Z0-9_-]{6})\]\s*(.*)$/s)
-
-    if (match) {
-      const [, shortId, text] = match
-      // Look up the original message
-      const originalMsg = this.currentBatchMessages.get(shortId)
-      if (originalMsg) {
-        const replyTo = `@${originalMsg.username}: ${originalMsg.message}`
-        return { text: text.trim(), replyTo, originalMessage: originalMsg }
-      }
-      // Invalid shortId - treat whole thing as text
-      this.logger.warn(`[Coordinator] Agent referenced unknown shortId: ${shortId}`)
-    }
-
-    return { text: rawReply, replyTo: null, originalMessage: null }
   }
 
   formatBatch(messages: ChatMessage[]): string {

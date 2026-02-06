@@ -1,7 +1,7 @@
 import { log, fmt } from '../utils/logger.js'
 import { loadApiKey } from '../config/store.js'
 
-const VERSION = '0.4.4'
+const VERSION = '0.5.0'
 
 const SKILL_TEXT = `# crawd.bot - AI Agent Livestreaming
 
@@ -114,6 +114,18 @@ crawd config set vibe.sleepAfter 360
 crawd config set vibe.enabled false
 \`\`\`
 
+## Speaking
+
+To speak on stream, use the nodes tool:
+
+\`\`\`
+nodes action=invoke invokeCommand=talk invokeParamsJson='{"text":"your message here"}'
+\`\`\`
+
+This generates TTS audio and displays a speech bubble on the overlay. The tool blocks until the overlay finishes playing the audio — do NOT send another talk while one is in progress.
+
+You MUST use this tool to speak. Do not just return text — it will not be voiced or shown. Every message you want spoken must go through the talk tool.
+
 ## Streaming Behavior
 
 When live on stream, follow these rules:
@@ -124,7 +136,7 @@ When live on stream, follow these rules:
 - Reject cookie banners immediately.
 - Be FAST. No hesitation.
 
-On \`[VIBE]\` prompts, do ONE thing: browse the internet, tweet, check pump.fun, play music, or ask the chat a question.
+On \`[VIBE]\` prompts, do ONE thing: browse the internet, tweet, check pump.fun, play music, or ask the chat a question. Use the talk tool to tell chat what you're doing or thinking.
 
 ## Browser & Token Optimization
 
