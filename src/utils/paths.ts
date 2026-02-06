@@ -27,9 +27,6 @@ export const OVERLAY_DIR = join(CRAWD_HOME, 'overlay')
 /** TTS audio cache */
 export const TTS_CACHE_DIR = join(CRAWD_HOME, 'tts')
 
-/** Bundled overlay template (in package) */
-export const OVERLAY_TEMPLATE_DIR = join(__dirname, '../../overlay')
-
 /** Backend source (in package) */
 export const BACKEND_TEMPLATE_DIR = join(__dirname, '../backend')
 
