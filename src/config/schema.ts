@@ -40,6 +40,18 @@ export const ConfigSchema = z.object({
     }).default({}),
   }).default({}),
 
+  /** Autonomous vibing state machine */
+  vibe: z.object({
+    /** Enable autonomous vibing (agent acts on its own between chat messages) */
+    enabled: z.boolean().default(true),
+    /** Seconds between vibe pings while active */
+    interval: z.number().default(10),
+    /** Seconds of inactivity before going idle */
+    idleAfter: z.number().default(60),
+    /** Seconds of inactivity before going to sleep (must be > idleAfter) */
+    sleepAfter: z.number().default(300),
+  }).default({}),
+
   /** Stream configuration */
   stream: z.object({
     /** RTMP stream key for pump.fun */

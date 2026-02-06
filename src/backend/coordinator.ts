@@ -22,8 +22,8 @@ export type CoordinatorConfig = {
 export const DEFAULT_CONFIG: CoordinatorConfig = {
   vibeEnabled: true,
   vibeIntervalMs: 10_000,
-  idleAfterMs: 30_000,
-  sleepAfterIdleMs: 60_000,
+  idleAfterMs: 60_000,
+  sleepAfterIdleMs: 240_000,
   vibePrompt: `[VIBE] Do one thing on the internet or ask the chat something.`,
 }
 
@@ -587,8 +587,8 @@ export class Coordinator {
       return
     }
 
-    // Wake up if idle, reset activity timer
-    if (this._state === 'idle') {
+    // Wake up from sleep or idle, reset activity timer
+    if (this._state !== 'active') {
       this.wake()
     } else {
       this.resetActivity()

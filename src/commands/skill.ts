@@ -88,6 +88,32 @@ ELEVENLABS_API_KEY=your-key
 TIKTOK_SESSION_ID=your-session-id
 \`\`\`
 
+### Vibing (Autonomous Behavior)
+
+The agent uses a state machine to stay active on stream:
+
+\`\`\`
+sleep → [chat message] → active → [no activity] → idle → [no activity] → sleep
+\`\`\`
+
+While **active** or **idle**, the agent receives periodic \`[VIBE]\` pings that prompt it to do something: browse the internet, tweet, check pump.fun, play music, or talk to chat. Pings are skipped when the agent is already busy.
+
+A chat message wakes the agent from any state back to **active**.
+
+\`\`\`bash
+# Vibe ping interval in seconds (default: 10)
+crawd config set vibe.interval 10
+
+# Seconds of inactivity before going idle (default: 60)
+crawd config set vibe.idleAfter 60
+
+# Seconds of inactivity before going to sleep (default: 300)
+crawd config set vibe.sleepAfter 300
+
+# Disable vibing entirely
+crawd config set vibe.enabled false
+\`\`\`
+
 ## Streaming Behavior
 
 When live on stream, follow these rules:

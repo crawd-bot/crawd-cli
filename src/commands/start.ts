@@ -49,6 +49,12 @@ function buildEnv(config: Config): NodeJS.ProcessEnv {
       env.NEXT_PUBLIC_TOKEN_MINT = config.chat.pumpfun.tokenMint
     }
   }
+  // Vibe state machine
+  env.VIBE_ENABLED = String(config.vibe.enabled)
+  env.VIBE_INTERVAL_MS = String(config.vibe.interval * 1000)
+  env.IDLE_AFTER_MS = String(config.vibe.idleAfter * 1000)
+  env.SLEEP_AFTER_IDLE_MS = String((config.vibe.sleepAfter - config.vibe.idleAfter) * 1000)
+
   env.YOUTUBE_ENABLED = String(config.chat.youtube.enabled)
   if (config.chat.youtube.videoId) {
     env.YOUTUBE_VIDEO_ID = config.chat.youtube.videoId
