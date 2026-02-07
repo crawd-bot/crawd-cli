@@ -337,25 +337,47 @@ async function main() {
           io.emit('crawd:status', { status });
         } else if (event.type === 'vibeExecuted' && !event.skipped) {
           io.emit('crawd:status', { status: 'vibing' });
-        } else if (event.type === 'chatProcessed') {
-          io.emit('crawd:status', { status: 'chatting' });
         }
+        // Note: chatProcessed no longer emits status — we only wake/emit
+        // when the agent actually replies (via talk tool or text fallback).
       });
 
-      /** Generate TTS and emit atomic talk event, wait for overlay ack */
-      async function handleTalkInvoke(text: string): Promise<void> {
+      /**
+       * Generate TTS and emit atomic talk event, wait for overlay ack.
+       * If replyTo is provided, also generates chat TTS — overlay plays chat first, then bot.
+       */
+      async function handleTalkInvoke(text: string, replyTo?: ChatMessage): Promise<void> {
         const talkId = randomUUID();
-        fastify.log.info({ talkId, text }, 'Handling talk invoke');
+        fastify.log.info({ talkId, text: text.slice(0, 80), replyTo: replyTo?.shortId }, 'Handling talk invoke');
 
-        const ttsUrl = await botTTS(text);
+        // Generate TTS in parallel when there's a chat message to reply to
+        const [ttsUrl, chatTtsUrl] = await Promise.all([
+          botTTS(text),
+          replyTo ? chatTTS(`Chat says: ${replyTo.message}`) : Promise.resolve(undefined),
+        ]);
 
         const event: TalkEvent = { id: talkId, message: text, ttsUrl };
+        if (replyTo && chatTtsUrl) {
+          event.chat = {
+            message: replyTo.message,
+            username: replyTo.username,
+            ttsUrl: chatTtsUrl,
+          };
+        }
+
         io.emit('crawd:talk', event);
-        fastify.log.info({ talkId, ttsUrl }, 'Emitted crawd:talk, waiting for ack');
+        fastify.log.info({ talkId, hasChat: !!event.chat }, 'Emitted crawd:talk, waiting for ack');
 
         await waitForTalkAck(talkId);
         fastify.log.info({ talkId }, 'Talk complete');
       }
+
+      // Fallback: when agent replies with text (instead of using the talk tool),
+      // still generate TTS and emit to overlay. If replyTo is available, bundle it.
+      coordinator.onTextReply = async (text: string, replyTo?: ChatMessage) => {
+        fastify.log.info({ text: text.slice(0, 80), replyTo: replyTo?.shortId }, 'Agent text reply fallback → talk');
+        await handleTalkInvoke(text, replyTo);
+      };
 
       try {
         await coordinator.start();
@@ -379,7 +401,19 @@ async function main() {
                   return;
                 }
 
-                await handleTalkInvoke(text);
+                // Agent is actively speaking — wake the coordinator
+                if (coordinator && coordinator.state !== 'active') {
+                  coordinator.wake();
+                } else {
+                  coordinator?.resetActivity();
+                }
+
+                // Look up replyTo chat message if provided
+                const replyTo = params.replyTo && coordinator
+                  ? coordinator.getRecentMessage(params.replyTo)
+                  : undefined;
+
+                await handleTalkInvoke(text, replyTo);
                 await gateway.sendInvokeResult(payload.id, payload.nodeId, {
                   ok: true,
                   payload: { spoken: true },

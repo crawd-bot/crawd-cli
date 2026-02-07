@@ -30,8 +30,16 @@ export type ReplyTurnEvent = {
 export type TalkEvent = {
   /** Correlation ID — overlay sends talk:done with this ID when audio finishes */
   id: string
+  /** Bot reply text */
   message: string
+  /** Bot TTS audio URL */
   ttsUrl: string
+  /** Optional: chat message being replied to (overlay plays this first) */
+  chat?: {
+    message: string
+    username: string
+    ttsUrl: string
+  }
 }
 
 /** Overlay → backend acknowledgement that a talk finished playing */

@@ -14,6 +14,9 @@ importers:
       '@fastify/static':
         specifier: ^8.1.0
         version: 8.3.0
+      '@sinclair/typebox':
+        specifier: ^0.32.35
+        version: 0.32.35
       '@stu43005/masterchat':
         specifier: ^1.5.0
         version: 1.5.0
@@ -412,6 +415,9 @@ packages:
     resolution: {integrity: sha512-mxRFDdHIWRxg3UfIIAwCm6NzvxG0jDX/wBN6KsQFTvKFqqg9vTrWUE68qEjHt19A5wwx5X5aUi2zuZT7YR0jrA==}
     cpu: [x64]
     os: [win32]
+
+  '@sinclair/typebox@0.32.35':
+    resolution: {integrity: sha512-Ul3YyOTU++to8cgNkttakC0dWvpERr6RYoHO2W47DLbFvrwBDJUY31B1sImH6JZSYc4Kt4PyHtoPNu+vL2r2dA==}
 
   '@socket.io/component-emitter@3.1.2':
     resolution: {integrity: sha512-9BCxFwvbGg/RsZK9tjXd8s4UcwR0MWeFQ1XEKIQVVvAGJyINdrqKMcTRyLoK8Rse1GjzLV9cwjWV1olXRWEXVA==}
@@ -1590,6 +1596,8 @@ snapshots:
 
   '@rollup/rollup-win32-x64-msvc@4.57.1':
     optional: true
+
+  '@sinclair/typebox@0.32.35': {}
 
   '@socket.io/component-emitter@3.1.2': {}
 

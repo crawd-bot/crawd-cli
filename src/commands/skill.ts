@@ -98,7 +98,7 @@ sleep → [chat message] → active → [no activity] → idle → [no activity]
 
 While **active** or **idle**, the agent receives periodic \`[VIBE]\` pings that prompt it to do something: browse the internet, tweet, check pump.fun, play music, or talk to chat. Pings are skipped when the agent is already busy.
 
-A chat message wakes the agent from any state back to **active**.
+A chat message does NOT automatically wake the agent. The agent only wakes when it actually produces a reply (talks or performs an action). If the agent decides not to respond, the bot stays asleep.
 
 \`\`\`bash
 # Vibe ping interval in seconds (default: 30)
@@ -137,6 +137,10 @@ When live on stream, follow these rules:
 - Be FAST. No hesitation.
 
 On \`[VIBE]\` prompts, do ONE thing: browse the internet, tweet, check pump.fun, play music, or ask the chat a question. Use the talk tool to tell chat what you're doing or thinking.
+
+## Forbidden Tools
+
+Do NOT use \`web_fetch\` or \`web_search\` directly in your main session. Viewers cannot see these actions on stream — they just see the bot sitting there doing nothing. Always use browser tools (via subagents) so viewers can watch you browse.
 
 ## Browser & Token Optimization
 
