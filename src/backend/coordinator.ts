@@ -3,7 +3,7 @@ import WebSocket from 'ws'
 import type { ChatMessage } from '../lib/chat/types'
 
 const BATCH_WINDOW_MS = 20_000
-const SESSION_KEY = process.env.CRAWD_CHANNEL_ID || 'crawd:live'
+const SESSION_KEY = process.env.CRAWD_CHANNEL_ID || 'agent:main:crawd:live'
 
 /** Coordinator configuration */
 export type CoordinatorConfig = {
@@ -390,11 +390,23 @@ export class Coordinator {
   private lastActivityAt = 0
   private vibeTimer: NodeJS.Timeout | null = null
   private sleepCheckTimer: NodeJS.Timeout | null = null
+  /** True while a flush or talk is being processed — vibes should wait */
+  private _busy = false
 
   // === Injected dependencies ===
   private readonly clock: IClock
   private readonly logger: Pick<Console, 'log' | 'error' | 'warn'>
   private readonly gatewayFactory: (url: string, token: string) => IGatewayClient
+
+  /**
+   * Fallback callback: called with agent text replies that weren't handled
+   * by the talk tool. Generates TTS + emits to overlay as a safety net.
+   * If replyTo is provided, the handler should also generate chat TTS.
+   */
+  onTextReply?: (text: string, replyTo?: ChatMessage) => Promise<void>
+
+  /** Recent messages by shortId — used to look up chat messages for talk tool replies */
+  private recentMessages = new Map<string, ChatMessage>()
 
   constructor(
     gatewayUrl: string,
@@ -445,6 +457,11 @@ export class Coordinator {
   /** Get the underlying gateway client (for registering invoke handlers) */
   getGateway(): IGatewayClient | null {
     return this.gateway
+  }
+
+  /** Look up a recent chat message by shortId (for talk tool replyTo) */
+  getRecentMessage(shortId: string): ChatMessage | undefined {
+    return this.recentMessages.get(shortId)
   }
 
   /** Set callback for coordinator events (useful for debugging/testing) */
@@ -519,6 +536,12 @@ export class Coordinator {
     this.emit({ type: 'stateChange', from, to: 'sleep' })
 
     this.stopVibeLoop()
+  }
+
+  /** Signal that the agent is speaking (via tool call) — keeps coordinator awake */
+  notifySpeech(): void {
+    if (this._state !== 'active') this.wake()
+    else this.resetActivity()
   }
 
   /** Reset activity timer (called on chat messages) */
@@ -602,10 +625,18 @@ export class Coordinator {
       return
     }
 
-    // Check if session is busy
+    // Check if session is busy (agent run in progress)
     if (this.gateway.isSessionBusy()) {
       this.logger.log('[Coordinator] Vibe skipped - session is busy')
       this.emit({ type: 'vibeExecuted', skipped: true, reason: 'session busy' })
+      this.scheduleNextVibe()
+      return
+    }
+
+    // Skip vibe if a flush/talk is still in progress (waiting for overlay ack)
+    if (this._busy) {
+      this.logger.log('[Coordinator] Vibe skipped - talk in progress')
+      this.emit({ type: 'vibeExecuted', skipped: true, reason: 'talk in progress' })
       this.scheduleNextVibe()
       return
     }
@@ -624,8 +655,8 @@ export class Coordinator {
     this.resetActivity()
 
     try {
-      // Agent handles its own speech via the talk tool
-      await this.gateway.triggerAgent(this.config.vibePrompt)
+      const replies = await this.gateway.triggerAgent(this.config.vibePrompt)
+      await this.handleTextReplies(replies)
     } catch (err) {
       this.logger.error('[Coordinator] Vibe failed:', err)
     }
@@ -649,14 +680,19 @@ export class Coordinator {
       return
     }
 
-    // Wake up from sleep or idle, reset activity timer
-    if (this._state !== 'active') {
-      this.wake()
-    } else {
-      this.resetActivity()
-    }
-
+    // Buffer the message — don't wake yet. We only wake when the agent
+    // actually produces a reply (talk tool or text fallback). This prevents
+    // the bot from visually waking up and then doing nothing.
     this.buffer.push(msg)
+
+    // Store for shortId lookup (talk tool replyTo). Cap at 200 to avoid unbounded growth.
+    if (msg.shortId) {
+      this.recentMessages.set(msg.shortId, msg)
+      if (this.recentMessages.size > 200) {
+        const oldest = this.recentMessages.keys().next().value!
+        this.recentMessages.delete(oldest)
+      }
+    }
 
     // Leading edge: if no timer running, flush immediately and start cooldown
     if (!this.timer) {
@@ -676,6 +712,9 @@ export class Coordinator {
     }
   }
 
+  /** Whether the coordinator is busy processing a flush or talk */
+  get busy(): boolean { return this._busy }
+
   private async flush(): Promise<void> {
     if (this.buffer.length === 0) return
 
@@ -690,12 +729,91 @@ export class Coordinator {
       return
     }
 
+    this._busy = true
     try {
-      // Agent handles its own speech via the talk tool
-      await this.gateway.triggerAgent(batchText)
+      const replies = await this.gateway.triggerAgent(batchText)
+      // Wake only if the agent actually produced speech — avoids waking the bot
+      // visually when the agent decides not to reply.
+      const hasSpeech = replies.some(r => {
+        const t = r.trim()
+        return t.length >= 3 && !t.includes('HEARTBEAT_OK') && !/^\d{3}\s/.test(t) && !t.includes('status code')
+      })
+      if (hasSpeech) {
+        if (this._state !== 'active') this.wake()
+        else this.resetActivity()
+      }
+      await this.handleTextReplies(replies, batch)
     } catch (err) {
       // Log and continue - don't retry, next batch will work if gateway recovers
       this.logger.error('[Coordinator] Failed to trigger agent:', err)
+    } finally {
+      this._busy = false
+    }
+  }
+
+  /**
+   * Process agent text replies as fallback speech.
+   * Skips errors, heartbeat acks, and empty replies.
+   * Extracts replyTo shortId from the raw text to pair with the original chat message.
+   * When the agent uses the talk tool natively, replies will be empty
+   * and this fallback won't fire.
+   */
+  private async handleTextReplies(replies: string[], batch?: ChatMessage[]): Promise<void> {
+    if (!this.onTextReply) return
+
+    for (const text of replies) {
+      const trimmed = text.trim()
+      if (trimmed.length < 3) continue
+      // Skip heartbeat acks anywhere in the text
+      if (trimmed.includes('HEARTBEAT_OK')) continue
+      // Skip HTTP error responses (e.g., "429 status code (no body)")
+      if (/^\d{3}\s/.test(trimmed) || trimmed.includes('status code')) continue
+      // Skip literal "None" / "none" replies (model artefact)
+      if (trimmed.toLowerCase() === 'none') continue
+
+      // Try to extract a replyTo shortId from the raw text.
+      // Agent replies often start with [shortId] referencing the message being replied to.
+      let replyTo: ChatMessage | undefined
+      const shortIdMatch = trimmed.match(/^\[([a-zA-Z0-9]{6})\]/)
+      if (shortIdMatch) {
+        replyTo = this.recentMessages.get(shortIdMatch[1])
+      }
+      // If no explicit shortId and batch has exactly 1 message, use it as replyTo
+      if (!replyTo && batch?.length === 1) {
+        replyTo = batch[0]
+      }
+
+      // Strip reasoning/thinking prefix from models that leak chain-of-thought.
+      // Pattern: reasoning lines followed by the actual spoken reply.
+      // Common indicators: lines starting with "[", "I should", "The user",
+      // or internal IDs like "[wNfSZ5]".
+      let spoken = trimmed
+      // If the reply has multiple paragraphs, take only the last substantial one
+      // (models often put reasoning first, then the actual reply)
+      const paragraphs = spoken.split(/\n\n+/).map(p => p.trim()).filter(p => p.length > 0)
+      if (paragraphs.length > 1) {
+        // Find the first paragraph that looks like actual speech (not reasoning)
+        const speechIdx = paragraphs.findIndex(p =>
+          !p.startsWith('[') &&
+          !p.startsWith('I should') &&
+          !p.startsWith('I need to') &&
+          !p.startsWith('The user') &&
+          !p.startsWith('I\'m caught') &&
+          !/^\[[\w]+\]/.test(p)
+        )
+        if (speechIdx >= 0) {
+          spoken = paragraphs.slice(speechIdx).join('\n\n')
+        }
+      }
+
+      spoken = spoken.trim()
+      if (spoken.length < 3) continue
+
+      try {
+        await this.onTextReply(spoken, replyTo)
+      } catch (err) {
+        this.logger.error('[Coordinator] Failed to process text reply:', err)
+      }
     }
   }
 

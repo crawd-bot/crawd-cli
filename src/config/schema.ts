@@ -7,7 +7,7 @@ export const ConfigSchema = z.object({
   gateway: z.object({
     url: z.string().default('ws://localhost:18789'),
     /** Channel ID for the agent session */
-    channelId: z.string().default('crawd:live'),
+    channelId: z.string().default('agent:main:crawd:live'),
   }).default({}),
 
   /** Server ports */
