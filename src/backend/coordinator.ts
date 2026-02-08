@@ -38,6 +38,9 @@ export type AgentReply = {
   originalMessage: ChatMessage | null
 }
 
+/** Function signature for triggering an agent turn */
+export type TriggerAgentFn = (message: string) => Promise<string[]>
+
 /** Payload for a node.invoke.request event from the gateway */
 export type InvokeRequestPayload = {
   id: string
@@ -94,7 +97,9 @@ type GatewayFrame = {
 }
 
 /**
- * Gateway client for OpenClaw WebSocket protocol.
+ * Gateway client for OpenClaw WebSocket protocol (persistent connection).
+ * Used by standalone mode (backend/index.ts) which needs persistent connection
+ * for node.invoke event handling.
  */
 export class GatewayClient implements IGatewayClient {
   private ws: WebSocket | null = null
@@ -359,7 +364,117 @@ export class GatewayClient implements IGatewayClient {
 }
 
 /**
- * Coordinator: batches chat messages and triggers agent turns via gateway.
+ * One-shot gateway client. Opens a fresh WebSocket per triggerAgent call —
+ * authenticates, sends the agent request, waits for the full response, then closes.
+ * No persistent connection or reconnect logic needed.
+ */
+export class OneShotGateway {
+  constructor(
+    private url: string,
+    private token: string,
+    private sessionKey: string = SESSION_KEY,
+  ) {}
+
+  async triggerAgent(message: string): Promise<string[]> {
+    return new Promise((resolve, reject) => {
+      const ws = new WebSocket(this.url)
+      const authId = randomUUID()
+      const agentId = randomUUID()
+      let settled = false
+
+      const timeout = setTimeout(() => {
+        if (!settled) {
+          settled = true
+          ws.close()
+          reject(new Error('One-shot gateway request timed out (120s)'))
+        }
+      }, 120_000)
+
+      const finish = (result?: string[], error?: Error) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timeout)
+        ws.close()
+        if (error) reject(error)
+        else resolve(result ?? [])
+      }
+
+      ws.on('open', () => {
+        ws.send(JSON.stringify({
+          type: 'req',
+          id: authId,
+          method: 'connect',
+          params: {
+            minProtocol: 3,
+            maxProtocol: 3,
+            client: {
+              id: 'crawd-oneshot',
+              version: '1.0.0',
+              platform: 'node',
+              mode: 'backend',
+            },
+            commands: ['talk'],
+            auth: { token: this.token },
+          },
+        }))
+      })
+
+      ws.on('message', (data) => {
+        try {
+          const frame = JSON.parse(data.toString()) as GatewayFrame
+
+          if (frame.type === 'res' && frame.id === authId) {
+            if (frame.error) {
+              finish(undefined, new Error(`Gateway auth failed: ${frame.error.message}`))
+              return
+            }
+            // Authenticated — send agent request
+            ws.send(JSON.stringify({
+              type: 'req',
+              id: agentId,
+              method: 'agent',
+              params: {
+                message,
+                idempotencyKey: randomUUID(),
+                sessionKey: this.sessionKey,
+              },
+            }))
+          } else if (frame.type === 'res' && frame.id === agentId) {
+            if (frame.error) {
+              finish(undefined, new Error(`Gateway agent request failed: ${frame.error.message}`))
+              return
+            }
+            if (frame.payload?.status === 'accepted') {
+              // Intermediate — wait for final response
+              return
+            }
+            // Final response
+            const payloads = (frame.payload as any)?.result?.payloads as Array<{ text?: string }> | undefined
+            const texts = payloads
+              ?.map(p => p.text)
+              .filter((t): t is string => typeof t === 'string' && t.length > 0) ?? []
+            finish(texts)
+          }
+        } catch {
+          // Parse error — ignore
+        }
+      })
+
+      ws.on('error', (err) => {
+        finish(undefined, err instanceof Error ? err : new Error(String(err)))
+      })
+
+      ws.on('close', () => {
+        if (!settled) {
+          finish(undefined, new Error('WebSocket closed unexpectedly'))
+        }
+      })
+    })
+  }
+}
+
+/**
+ * Coordinator: batches chat messages and triggers agent turns.
  */
 /** Grace period for filtering old messages (30 seconds before startup) */
 const STARTUP_GRACE_MS = 30_000
@@ -368,8 +483,6 @@ const SLEEP_CHECK_INTERVAL_MS = 10_000
 
 /** Dependencies that can be injected for testing */
 export type CoordinatorDeps = {
-  gateway?: IGatewayClient
-  gatewayFactory?: (url: string, token: string) => IGatewayClient
   clock?: IClock
   logger?: Pick<Console, 'log' | 'error' | 'warn'>
 }
@@ -385,9 +498,7 @@ export type CoordinatorEvent =
 export class Coordinator {
   private buffer: ChatMessage[] = []
   private timer: NodeJS.Timeout | null = null
-  private gateway: IGatewayClient | null = null
-  private gatewayUrl: string
-  private gatewayToken: string
+  private triggerFn: TriggerAgentFn
   private onEvent?: (event: CoordinatorEvent) => void
   /** Timestamp when coordinator was created (used to filter old messages on restart) */
   private readonly startedAt: number
@@ -401,37 +512,28 @@ export class Coordinator {
   private sleepCheckTimer: NodeJS.Timeout | null = null
   /** True while a flush or talk is being processed — vibes should wait */
   private _busy = false
-  /** Serializes all gateway.triggerAgent() calls to prevent concurrent runs */
+  /** Serializes all triggerAgent calls to prevent concurrent runs */
   private _gatewayQueue: Promise<void> = Promise.resolve()
 
   // === Injected dependencies ===
   private readonly clock: IClock
   private readonly logger: Pick<Console, 'log' | 'error' | 'warn'>
-  private readonly gatewayFactory: (url: string, token: string) => IGatewayClient
 
   /** Recent messages by shortId — used to look up chat messages for talk tool replies */
   private recentMessages = new Map<string, ChatMessage>()
 
   constructor(
-    gatewayUrl: string,
-    gatewayToken: string,
+    triggerAgent: TriggerAgentFn,
     config: Partial<CoordinatorConfig> = {},
     deps: CoordinatorDeps = {}
   ) {
-    this.gatewayUrl = gatewayUrl
-    this.gatewayToken = gatewayToken
+    this.triggerFn = triggerAgent
     this.config = { ...DEFAULT_CONFIG, ...config }
 
     // Inject dependencies or use defaults
     this.clock = deps.clock ?? realClock
     this.logger = deps.logger ?? console
-    this.gatewayFactory = deps.gatewayFactory ?? ((url, token) => new GatewayClient(url, token))
     this.startedAt = this.clock.now()
-
-    // Allow pre-injecting gateway (useful for tests)
-    if (deps.gateway) {
-      this.gateway = deps.gateway
-    }
   }
 
   /** Get current state (public for testing) */
@@ -458,11 +560,6 @@ export class Coordinator {
     }
   }
 
-  /** Get the underlying gateway client (for registering invoke handlers) */
-  getGateway(): IGatewayClient | null {
-    return this.gateway
-  }
-
   /** Look up a recent chat message by shortId (for talk tool replyTo) */
   getRecentMessage(shortId: string): ChatMessage | undefined {
     return this.recentMessages.get(shortId)
@@ -477,11 +574,7 @@ export class Coordinator {
     this.onEvent?.(event)
   }
 
-  async start(): Promise<void> {
-    if (!this.gateway) {
-      this.gateway = this.gatewayFactory(this.gatewayUrl, this.gatewayToken)
-      await this.gateway.connect()
-    }
+  start(): void {
     this.logger.log('[Coordinator] Started in SLEEP state')
     this.logger.log('[Coordinator] Config:', {
       vibeIntervalMs: this.config.vibeIntervalMs,
@@ -496,8 +589,6 @@ export class Coordinator {
       this.clock.clearTimeout(this.timer)
       this.timer = null
     }
-    this.gateway?.disconnect()
-    this.gateway = null
     this._state = 'sleep'
     this.logger.log('[Coordinator] Stopped')
   }
@@ -546,11 +637,9 @@ export class Coordinator {
 
   /** Compact the agent's session context before sleeping to free stale history */
   private compactSession(): void {
-    if (!this.gateway?.isConnected()) return
-
     this._gatewayQueue = this._gatewayQueue.then(async () => {
       try {
-        await this.gateway!.triggerAgent('/compact')
+        await this.triggerFn('/compact')
         this.logger.log('[Coordinator] Session compacted before sleep')
       } catch (err) {
         this.logger.error('[Coordinator] Failed to compact session:', err)
@@ -638,20 +727,6 @@ export class Coordinator {
       this.emit({ type: 'vibeExecuted', skipped: true, reason: 'sleeping' })
       return
     }
-    if (!this.gateway?.isConnected()) {
-      this.logger.log('[Coordinator] Vibe skipped - gateway not connected')
-      this.emit({ type: 'vibeExecuted', skipped: true, reason: 'gateway not connected' })
-      this.scheduleNextVibe()
-      return
-    }
-
-    // Check if session is busy (agent run in progress)
-    if (this.gateway.isSessionBusy()) {
-      this.logger.log('[Coordinator] Vibe skipped - session is busy')
-      this.emit({ type: 'vibeExecuted', skipped: true, reason: 'session busy' })
-      this.scheduleNextVibe()
-      return
-    }
 
     // Skip vibe if a flush/talk is still in progress (waiting for overlay ack)
     if (this._busy) {
@@ -679,7 +754,7 @@ export class Coordinator {
     const vibeOp = this._gatewayQueue.then(async () => {
       this._busy = true
       try {
-        await this.gateway!.triggerAgent(this.config.vibePrompt)
+        await this.triggerFn(this.config.vibePrompt)
       } catch (err) {
         this.logger.error('[Coordinator] Vibe failed:', err)
       } finally {
@@ -755,17 +830,12 @@ export class Coordinator {
     this.logger.log(`[Coordinator] Flushing ${batch.length} messages`)
     this.emit({ type: 'chatProcessed', count: batch.length })
 
-    if (!this.gateway?.isConnected()) {
-      this.logger.error('[Coordinator] Gateway not connected, messages lost')
-      return
-    }
-
     // Chain on the gateway queue to prevent concurrent triggerAgent() calls
     this._busy = true
     this._gatewayQueue = this._gatewayQueue.then(async () => {
       this._busy = true
       try {
-        await this.gateway!.triggerAgent(batchText)
+        await this.triggerFn(batchText)
       } catch (err) {
         this.logger.error('[Coordinator] Failed to trigger agent:', err)
       } finally {

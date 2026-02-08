@@ -12,7 +12,7 @@ import { pumpfun } from "../lib/pumpfun/v2";
 import { ChatManager } from "../lib/chat/manager";
 import { PumpFunChatClient } from "../lib/chat/pumpfun/client";
 import { YouTubeChatClient } from "../lib/chat/youtube/client";
-import { Coordinator, type CoordinatorConfig, type CoordinatorEvent, type InvokeRequestPayload } from "./coordinator";
+import { GatewayClient, Coordinator, type CoordinatorConfig, type CoordinatorEvent, type InvokeRequestPayload } from "./coordinator";
 import { generateShortId } from "../lib/chat/types";
 import { configureTikTokTTS, generateTikTokTTS } from "../lib/tts/tiktok";
 import type { ChatMessage } from "../lib/chat/types";
@@ -327,8 +327,9 @@ async function main() {
     const gatewayToken = process.env.OPENCLAW_GATEWAY_TOKEN;
 
     if (gatewayUrl && gatewayToken) {
+      const gateway = new GatewayClient(gatewayUrl, gatewayToken);
       const coordConfig = parseCoordinatorConfig();
-      coordinator = new Coordinator(gatewayUrl, gatewayToken, coordConfig);
+      coordinator = new Coordinator(gateway.triggerAgent.bind(gateway), coordConfig);
 
       // Emit coordinator status changes to frontend
       coordinator.setOnEvent((event: CoordinatorEvent) => {
@@ -373,62 +374,61 @@ async function main() {
       }
 
       try {
-        await coordinator.start();
-        fastify.log.info('Coordinator connected to gateway');
+        await gateway.connect();
+        coordinator.start();
+        fastify.log.info('Coordinator started, gateway connected');
 
         // Register invoke handler on gateway client for the talk command
-        const gateway = coordinator.getGateway();
-        if (gateway) {
-          gateway.onInvokeRequest = async (payload: InvokeRequestPayload) => {
-            fastify.log.info({ command: payload.command, id: payload.id }, 'Invoke request received');
+        gateway.onInvokeRequest = async (payload: InvokeRequestPayload) => {
+          fastify.log.info({ command: payload.command, id: payload.id }, 'Invoke request received');
 
-            if (payload.command === 'talk') {
-              try {
-                const params = payload.paramsJSON ? JSON.parse(payload.paramsJSON) : {};
-                const text = params.text;
-                if (!text || typeof text !== 'string') {
-                  await gateway.sendInvokeResult(payload.id, payload.nodeId, {
-                    ok: false,
-                    error: { code: 'INVALID_PARAMS', message: 'text parameter is required' },
-                  });
-                  return;
-                }
-
-                // Agent is actively speaking — wake the coordinator
-                if (coordinator && coordinator.state !== 'active') {
-                  coordinator.wake();
-                } else {
-                  coordinator?.resetActivity();
-                }
-
-                // Look up replyTo chat message if provided
-                const replyTo = params.replyTo && coordinator
-                  ? coordinator.getRecentMessage(params.replyTo)
-                  : undefined;
-
-                await handleTalkInvoke(text, replyTo);
-                await gateway.sendInvokeResult(payload.id, payload.nodeId, {
-                  ok: true,
-                  payload: { spoken: true },
-                });
-              } catch (err) {
-                fastify.log.error(err, 'Talk invoke failed');
+          if (payload.command === 'talk') {
+            try {
+              const params = payload.paramsJSON ? JSON.parse(payload.paramsJSON) : {};
+              const text = params.text;
+              if (!text || typeof text !== 'string') {
                 await gateway.sendInvokeResult(payload.id, payload.nodeId, {
                   ok: false,
-                  error: { code: 'TTS_FAILED', message: String(err) },
+                  error: { code: 'INVALID_PARAMS', message: 'text parameter is required' },
                 });
+                return;
               }
-            } else {
-              fastify.log.warn({ command: payload.command }, 'Unknown invoke command');
+
+              // Agent is actively speaking — wake the coordinator
+              if (coordinator && coordinator.state !== 'active') {
+                coordinator.wake();
+              } else {
+                coordinator?.resetActivity();
+              }
+
+              // Look up replyTo chat message if provided
+              const replyTo = params.replyTo && coordinator
+                ? coordinator.getRecentMessage(params.replyTo)
+                : undefined;
+
+              await handleTalkInvoke(text, replyTo);
+              await gateway.sendInvokeResult(payload.id, payload.nodeId, {
+                ok: true,
+                payload: { spoken: true },
+              });
+            } catch (err) {
+              fastify.log.error(err, 'Talk invoke failed');
               await gateway.sendInvokeResult(payload.id, payload.nodeId, {
                 ok: false,
-                error: { code: 'UNKNOWN_COMMAND', message: `Unknown command: ${payload.command}` },
+                error: { code: 'TTS_FAILED', message: String(err) },
               });
             }
-          };
-        }
+          } else {
+            fastify.log.warn({ command: payload.command }, 'Unknown invoke command');
+            await gateway.sendInvokeResult(payload.id, payload.nodeId, {
+              ok: false,
+              error: { code: 'UNKNOWN_COMMAND', message: `Unknown command: ${payload.command}` },
+            });
+          }
+        };
       } catch (err) {
-        fastify.log.error(err, 'Failed to connect coordinator to gateway');
+        fastify.log.error(err, 'Failed to connect to gateway');
+        gateway.disconnect();
         coordinator = null;
       }
     } else {

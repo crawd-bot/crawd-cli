@@ -15,7 +15,7 @@ import { pumpfun } from '../lib/pumpfun/v2/index.js'
 import { ChatManager } from '../lib/chat/manager.js'
 import { PumpFunChatClient } from '../lib/chat/pumpfun/client.js'
 import { YouTubeChatClient } from '../lib/chat/youtube/client.js'
-import { Coordinator, type CoordinatorConfig, type CoordinatorEvent } from './coordinator.js'
+import { Coordinator, OneShotGateway, type CoordinatorConfig, type CoordinatorEvent } from './coordinator.js'
 import { generateShortId } from '../lib/chat/types.js'
 import { configureTikTokTTS, generateTikTokTTS } from '../lib/tts/tiktok.js'
 import type { ChatMessage } from '../lib/chat/types.js'
@@ -340,7 +340,12 @@ export class CrawdBackend {
       this.coordinator?.onMessage(msg)
     })
 
-    if (this.config.gatewayUrl && this.config.gatewayToken) {
+    if (this.config.gatewayUrl) {
+      const gateway = new OneShotGateway(
+        this.config.gatewayUrl,
+        this.config.gatewayToken ?? '',
+      )
+
       const coordConfig: Partial<CoordinatorConfig> = {
         vibeEnabled: this.config.vibe.enabled,
         vibeIntervalMs: this.config.vibe.intervalMs,
@@ -352,8 +357,7 @@ export class CrawdBackend {
       }
 
       this.coordinator = new Coordinator(
-        this.config.gatewayUrl,
-        this.config.gatewayToken,
+        gateway.triggerAgent.bind(gateway),
         coordConfig,
       )
 
@@ -367,13 +371,8 @@ export class CrawdBackend {
         }
       })
 
-      try {
-        await this.coordinator.start()
-        this.fastify.log.info('Coordinator connected to gateway')
-      } catch (err) {
-        this.fastify.log.error(err, 'Failed to connect coordinator to gateway')
-        this.coordinator = null
-      }
+      this.coordinator.start()
+      this.fastify.log.info('Coordinator started (one-shot gateway)')
     } else {
       this.fastify.log.warn('Gateway not configured — coordinator disabled')
     }
