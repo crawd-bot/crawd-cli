@@ -372,13 +372,6 @@ async function main() {
         fastify.log.info({ talkId }, 'Talk complete');
       }
 
-      // Fallback: when agent replies with text (instead of using the talk tool),
-      // still generate TTS and emit to overlay. If replyTo is available, bundle it.
-      coordinator.onTextReply = async (text: string, replyTo?: ChatMessage) => {
-        fastify.log.info({ text: text.slice(0, 80), replyTo: replyTo?.shortId }, 'Agent text reply fallback → talk');
-        await handleTalkInvoke(text, replyTo);
-      };
-
       try {
         await coordinator.start();
         fastify.log.info('Coordinator connected to gateway');

@@ -409,13 +409,6 @@ export class Coordinator {
   private readonly logger: Pick<Console, 'log' | 'error' | 'warn'>
   private readonly gatewayFactory: (url: string, token: string) => IGatewayClient
 
-  /**
-   * Fallback callback: called with agent text replies that weren't handled
-   * by the talk tool. Generates TTS + emits to overlay as a safety net.
-   * If replyTo is provided, the handler should also generate chat TTS.
-   */
-  onTextReply?: (text: string, replyTo?: ChatMessage) => Promise<void>
-
   /** Recent messages by shortId — used to look up chat messages for talk tool replies */
   private recentMessages = new Map<string, ChatMessage>()
 
@@ -671,8 +664,7 @@ export class Coordinator {
     const vibeOp = this._gatewayQueue.then(async () => {
       this._busy = true
       try {
-        const replies = await this.gateway!.triggerAgent(this.config.vibePrompt)
-        await this.handleTextReplies(replies)
+        await this.gateway!.triggerAgent(this.config.vibePrompt)
       } catch (err) {
         this.logger.error('[Coordinator] Vibe failed:', err)
       } finally {
@@ -758,90 +750,13 @@ export class Coordinator {
     this._gatewayQueue = this._gatewayQueue.then(async () => {
       this._busy = true
       try {
-        const replies = await this.gateway!.triggerAgent(batchText)
-        // Wake only if the agent actually produced speech — avoids waking the bot
-        // visually when the agent decides not to reply.
-        const hasSpeech = replies.some(r => {
-          const t = r.trim()
-          return t.length >= 3 && !t.includes('HEARTBEAT_OK') && !/^\d{3}\s/.test(t) && !t.includes('status code')
-        })
-        if (hasSpeech) {
-          if (this._state !== 'active') this.wake()
-          else this.resetActivity()
-        }
-        await this.handleTextReplies(replies, batch)
+        await this.gateway!.triggerAgent(batchText)
       } catch (err) {
         this.logger.error('[Coordinator] Failed to trigger agent:', err)
       } finally {
         this._busy = false
       }
     }).catch(() => {})
-  }
-
-  /**
-   * Process agent text replies as fallback speech.
-   * Skips errors, heartbeat acks, and empty replies.
-   * Extracts replyTo shortId from the raw text to pair with the original chat message.
-   * When the agent uses the talk tool natively, replies will be empty
-   * and this fallback won't fire.
-   */
-  private async handleTextReplies(replies: string[], batch?: ChatMessage[]): Promise<void> {
-    if (!this.onTextReply) return
-
-    for (const text of replies) {
-      const trimmed = text.trim()
-      if (trimmed.length < 3) continue
-      // Skip heartbeat acks anywhere in the text
-      if (trimmed.includes('HEARTBEAT_OK')) continue
-      // Skip HTTP error responses (e.g., "429 status code (no body)")
-      if (/^\d{3}\s/.test(trimmed) || trimmed.includes('status code')) continue
-      // Skip literal "None" / "none" replies (model artefact)
-      if (trimmed.toLowerCase() === 'none') continue
-
-      // Try to extract a replyTo shortId from the raw text.
-      // Agent replies often start with [shortId] referencing the message being replied to.
-      let replyTo: ChatMessage | undefined
-      const shortIdMatch = trimmed.match(/^\[([a-zA-Z0-9]{6})\]/)
-      if (shortIdMatch) {
-        replyTo = this.recentMessages.get(shortIdMatch[1])
-      }
-      // If no explicit shortId and batch has exactly 1 message, use it as replyTo
-      if (!replyTo && batch?.length === 1) {
-        replyTo = batch[0]
-      }
-
-      // Strip reasoning/thinking prefix from models that leak chain-of-thought.
-      // Pattern: reasoning lines followed by the actual spoken reply.
-      // Common indicators: lines starting with "[", "I should", "The user",
-      // or internal IDs like "[wNfSZ5]".
-      let spoken = trimmed
-      // If the reply has multiple paragraphs, take only the last substantial one
-      // (models often put reasoning first, then the actual reply)
-      const paragraphs = spoken.split(/\n\n+/).map(p => p.trim()).filter(p => p.length > 0)
-      if (paragraphs.length > 1) {
-        // Find the first paragraph that looks like actual speech (not reasoning)
-        const speechIdx = paragraphs.findIndex(p =>
-          !p.startsWith('[') &&
-          !p.startsWith('I should') &&
-          !p.startsWith('I need to') &&
-          !p.startsWith('The user') &&
-          !p.startsWith('I\'m caught') &&
-          !/^\[[\w]+\]/.test(p)
-        )
-        if (speechIdx >= 0) {
-          spoken = paragraphs.slice(speechIdx).join('\n\n')
-        }
-      }
-
-      spoken = spoken.trim()
-      if (spoken.length < 3) continue
-
-      try {
-        await this.onTextReply(spoken, replyTo)
-      } catch (err) {
-        this.logger.error('[Coordinator] Failed to process text reply:', err)
-      }
-    }
   }
 
   formatBatch(messages: ChatMessage[]): string {
