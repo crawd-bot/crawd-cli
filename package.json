@@ -1,5 +1,5 @@
 {
-  "name": "@crawd/cli",
+  "name": "crawd",
   "version": "0.8.0",
   "description": "CLI for crawd.bot - AI agent livestreaming platform",
   "type": "module",

@@ -26,6 +26,7 @@ import type {
   ReplyTurnEvent,
   TalkEvent,
   TalkDoneEvent,
+  MockChatEvent,
   StatusEvent,
   McapEvent,
 } from './types'
@@ -41,6 +42,7 @@ export type CrawdClientEvents = {
 
 export type CrawdEmitEvents = {
   'talk:done': TalkDoneEvent
+  'mock-chat': MockChatEvent
 }
 
 export type CrawdClient = {
@@ -63,6 +65,7 @@ export function createCrawdClient(url: string): CrawdClient {
     'reply-turn': 'crawd:reply-turn',
     'talk': 'crawd:talk',
     'talk:done': 'crawd:talk:done',
+    'mock-chat': 'crawd:mock-chat',
     'status': 'crawd:status',
     'mcap': 'crawd:mcap',
   }

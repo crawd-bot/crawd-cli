@@ -541,6 +541,21 @@ export class Coordinator {
     this.emit({ type: 'stateChange', from, to: 'sleep' })
 
     this.stopVibeLoop()
+    this.compactSession()
+  }
+
+  /** Compact the agent's session context before sleeping to free stale history */
+  private compactSession(): void {
+    if (!this.gateway?.isConnected()) return
+
+    this._gatewayQueue = this._gatewayQueue.then(async () => {
+      try {
+        await this.gateway!.triggerAgent('/compact')
+        this.logger.log('[Coordinator] Session compacted before sleep')
+      } catch (err) {
+        this.logger.error('[Coordinator] Failed to compact session:', err)
+      }
+    }).catch(() => {})
   }
 
   /** Signal that the agent is speaking (via tool call) — keeps coordinator awake */

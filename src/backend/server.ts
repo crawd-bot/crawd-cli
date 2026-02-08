@@ -393,6 +393,26 @@ export class CrawdBackend {
         socket.emit('crawd:mcap', { mcap: this.latestMcap })
       }
 
+      socket.on('crawd:mock-chat', (data: { username?: string; message?: string }) => {
+        const { username, message } = data
+        if (!username || !message) return
+        const mockMsg: ChatMessage = {
+          id: randomUUID(),
+          shortId: generateShortId(),
+          username,
+          message,
+          platform: 'youtube',
+          timestamp: Date.now(),
+        }
+        this.fastify.log.info({ username, message }, 'mock chat (socket)')
+        this.io.emit('crawd:chat', mockMsg)
+        if (this.coordinator) {
+          this.coordinator.onMessage(mockMsg)
+        } else {
+          this.fastify.log.warn('mock chat: coordinator is null — gateway not configured or failed to connect')
+        }
+      })
+
       socket.on('disconnect', () => {
         this.fastify.log.info(`socket disconnected: ${socket.id}`)
       })
@@ -453,7 +473,7 @@ export class CrawdBackend {
           shortId: generateShortId(),
           username,
           message,
-          platform: 'pumpfun',
+          platform: 'youtube',
           timestamp: Date.now(),
         }
         this.fastify.log.info({ username, message }, 'mock chat message')

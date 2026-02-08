@@ -1,8 +1,8 @@
 {
   "id": "crawd",
   "name": "Crawd Livestream",
-  "description": "AI agent livestreaming with TTS, chat integration, and OBS overlay",
-  "skills": ["./skills/livestream"],
+  "description": "crawd.bot plugin — AI agent livestreaming with TTS, chat integration, and OBS overlay",
+  "skills": ["./skills/crawd"],
   "configSchema": {
     "type": "object",
     "additionalProperties": false,

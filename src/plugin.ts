@@ -4,7 +4,6 @@
  * Registers:
  * - `livestream_talk` tool (unprompted speech on stream)
  * - `livestream_reply` tool (reply to a chat message)
- * - `livestream_notification` tool (big notification on stream)
  * - `crawd` service (Fastify + Socket.IO backend)
  */
 import { Type } from '@sinclair/typebox'
@@ -49,6 +48,13 @@ function parseTtsChain(raw: unknown): TtsVoiceEntry[] {
     }))
 }
 
+/** Resolve gateway WebSocket URL from env/defaults (same logic as OpenClaw's callGateway) */
+function resolveGatewayUrl(): string {
+  const portRaw = process.env.OPENCLAW_GATEWAY_PORT?.trim()
+  const port = portRaw ? parseInt(portRaw, 10) || 18789 : 18789
+  return `ws://127.0.0.1:${port}`
+}
+
 function parsePluginConfig(raw: Record<string, unknown> | undefined): CrawdConfig {
   const cfg = raw ?? {}
   const tts = (cfg.tts ?? {}) as Record<string, unknown>
@@ -89,8 +95,11 @@ function parsePluginConfig(raw: Record<string, unknown> | undefined): CrawdConfi
         authToken: typeof pumpfun.authToken === 'string' ? pumpfun.authToken : undefined,
       },
     },
-    gatewayUrl: typeof cfg.gatewayUrl === 'string' ? cfg.gatewayUrl : undefined,
-    gatewayToken: typeof cfg.gatewayToken === 'string' ? cfg.gatewayToken : undefined,
+    // Gateway: plugin config overrides, then env vars, then OpenClaw defaults
+    gatewayUrl: typeof cfg.gatewayUrl === 'string' ? cfg.gatewayUrl
+      : process.env.OPENCLAW_GATEWAY_URL ?? resolveGatewayUrl(),
+    gatewayToken: typeof cfg.gatewayToken === 'string' ? cfg.gatewayToken
+      : process.env.OPENCLAW_GATEWAY_TOKEN,
   }
 }
 
@@ -125,15 +134,15 @@ const crawdConfigSchema = {
     'chat.pumpfun.enabled': { label: 'PumpFun Chat' },
     'chat.pumpfun.tokenMint': { label: 'PumpFun Token Mint' },
     'chat.pumpfun.authToken': { label: 'PumpFun Auth Token', sensitive: true },
-    gatewayUrl: { label: 'Gateway URL', advanced: true, help: 'WebSocket URL for agent triggering' },
-    gatewayToken: { label: 'Gateway Token', sensitive: true },
+    gatewayUrl: { label: 'Gateway URL', advanced: true, help: 'Override auto-detected gateway URL (usually not needed)' },
+    gatewayToken: { label: 'Gateway Token', advanced: true, sensitive: true, help: 'Override OPENCLAW_GATEWAY_TOKEN env var' },
   },
 }
 
 const plugin: PluginDefinition = {
   id: 'crawd',
   name: 'Crawd Livestream',
-  description: 'AI agent livestreaming with TTS, chat integration, and OBS overlay',
+  description: 'crawd.bot plugin — AI agent livestreaming with TTS, chat integration, and OBS overlay',
   configSchema: crawdConfigSchema,
 
   register(api: PluginApi) {
@@ -209,29 +218,6 @@ const plugin: PluginDefinition = {
         },
       },
       { name: 'livestream_reply' },
-    )
-
-    // livestream_notification — big notification on overlay
-    api.registerTool(
-      {
-        name: 'livestream_notification',
-        label: 'Livestream Notification',
-        description:
-          'Show a big notification on the livestream overlay with TTS. Use to highlight chat messages or announce events.',
-        parameters: Type.Object({
-          body: Type.String({ description: 'Notification text to display and speak' }),
-        }),
-        async execute(_toolCallId: string, params: unknown) {
-          const b = await ensureBackend()
-          const { body } = params as { body: string }
-          const result = await b.handleNotification(body)
-          return {
-            content: [{ type: 'text', text: `Notification sent: "${body}"` }],
-            details: result,
-          }
-        },
-      },
-      { name: 'livestream_notification' },
     )
 
     // Service lifecycle

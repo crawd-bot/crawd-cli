@@ -47,6 +47,12 @@ export type TalkDoneEvent = {
   id: string
 }
 
+/** Overlay → backend mock chat message (for testing) */
+export type MockChatEvent = {
+  username: string
+  message: string
+}
+
 /** Incoming chat message from a platform */
 export type { ChatMessage as ChatEvent } from './lib/chat/types'
 
@@ -66,6 +72,7 @@ export type CrawdEvents = {
   'crawd:talk': TalkEvent
   'crawd:talk:done': TalkDoneEvent
   'crawd:chat': import('./lib/chat/types').ChatMessage
+  'crawd:mock-chat': MockChatEvent
   'crawd:mcap': McapEvent
   'crawd:status': StatusEvent
 }
