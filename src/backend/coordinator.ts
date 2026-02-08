@@ -102,8 +102,9 @@ export class GatewayClient implements IGatewayClient {
   private token: string
   private connected = false
   private pendingRequests = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>()
-  /** Track active run IDs for our session to detect if agent is busy */
-  private activeRunIds = new Set<string>()
+  /** Track active run IDs for our session to detect if agent is busy (runId → startTimestamp) */
+  private activeRunIds = new Map<string, number>()
+  private static readonly RUN_TTL_MS = 120_000
   private targetSessionKey: string
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private reconnectDelay = 1000
@@ -153,6 +154,7 @@ export class GatewayClient implements IGatewayClient {
 
       this.ws.on('close', () => {
         this.connected = false
+        this.activeRunIds.clear()
         console.log('[Gateway] Disconnected')
         this.scheduleReconnect()
       })
@@ -233,12 +235,12 @@ export class GatewayClient implements IGatewayClient {
           // Lifecycle events: stream='lifecycle', data.phase='start'|'end'
           // Other activity: stream='tool'|'assistant'
           if (stream === 'lifecycle' && phase === 'start') {
-            this.activeRunIds.add(runId)
+            this.activeRunIds.set(runId, Date.now())
           } else if (stream === 'lifecycle' && (phase === 'end' || phase === 'error')) {
             this.activeRunIds.delete(runId)
           } else if (stream === 'tool' || stream === 'assistant') {
             // Also mark as active during streaming
-            this.activeRunIds.add(runId)
+            this.activeRunIds.set(runId, Date.now())
           }
         }
       }
@@ -321,8 +323,14 @@ export class GatewayClient implements IGatewayClient {
     return this.connected
   }
 
-  /** Check if the target session has an active agent run */
+  /** Check if the target session has an active agent run (evicts stale entries beyond TTL) */
   isSessionBusy(): boolean {
+    const now = Date.now()
+    for (const [runId, startedAt] of this.activeRunIds) {
+      if (now - startedAt > GatewayClient.RUN_TTL_MS) {
+        this.activeRunIds.delete(runId)
+      }
+    }
     return this.activeRunIds.size > 0
   }
 
@@ -388,10 +396,13 @@ export class Coordinator {
   private config: CoordinatorConfig
   private _state: CoordinatorState = 'sleep'
   private lastActivityAt = 0
+  private idleSince = 0
   private vibeTimer: NodeJS.Timeout | null = null
   private sleepCheckTimer: NodeJS.Timeout | null = null
   /** True while a flush or talk is being processed — vibes should wait */
   private _busy = false
+  /** Serializes all gateway.triggerAgent() calls to prevent concurrent runs */
+  private _gatewayQueue: Promise<void> = Promise.resolve()
 
   // === Injected dependencies ===
   private readonly clock: IClock
@@ -520,6 +531,7 @@ export class Coordinator {
 
     const from = this._state
     this._state = 'idle'
+    this.idleSince = this.clock.now()
     this.logger.log('[Coordinator] IDLE - transitioning to IDLE state (waiting)')
     this.emit({ type: 'stateChange', from, to: 'idle' })
 
@@ -572,13 +584,13 @@ export class Coordinator {
           this.goIdle()
         }
       } else if (this._state === 'idle') {
-        // Idle → Sleep after sleepAfterIdleMs (measured from when we became idle)
-        const totalInactive = inactiveFor
-        const willSleep = totalInactive >= (this.config.idleAfterMs + this.config.sleepAfterIdleMs)
-        this.emit({ type: 'sleepCheck', inactiveForMs: totalInactive, willSleep })
+        // Idle → Sleep after sleepAfterIdleMs (measured from when we entered idle)
+        const idleDuration = this.clock.now() - this.idleSince
+        const willSleep = idleDuration >= this.config.sleepAfterIdleMs
+        this.emit({ type: 'sleepCheck', inactiveForMs: idleDuration, willSleep })
 
         if (willSleep) {
-          this.logger.log(`[Coordinator] No activity for ${Math.round(totalInactive / 1000)}s, going to sleep`)
+          this.logger.log(`[Coordinator] Idle for ${Math.round(idleDuration / 1000)}s, going to sleep`)
           this.goSleep()
         }
       }
@@ -654,12 +666,24 @@ export class Coordinator {
     // Reset activity timer
     this.resetActivity()
 
+    // Chain on the gateway queue to prevent concurrent triggerAgent() calls
+    this._busy = true
+    const vibeOp = this._gatewayQueue.then(async () => {
+      this._busy = true
+      try {
+        const replies = await this.gateway!.triggerAgent(this.config.vibePrompt)
+        await this.handleTextReplies(replies)
+      } catch (err) {
+        this.logger.error('[Coordinator] Vibe failed:', err)
+      } finally {
+        this._busy = false
+      }
+    })
+    this._gatewayQueue = vibeOp.catch(() => {})
+
     try {
-      const replies = await this.gateway.triggerAgent(this.config.vibePrompt)
-      await this.handleTextReplies(replies)
-    } catch (err) {
-      this.logger.error('[Coordinator] Vibe failed:', err)
-    }
+      await vibeOp
+    } catch {}
 
     // Schedule next vibe
     this.scheduleNextVibe()
@@ -715,7 +739,7 @@ export class Coordinator {
   /** Whether the coordinator is busy processing a flush or talk */
   get busy(): boolean { return this._busy }
 
-  private async flush(): Promise<void> {
+  private flush(): void {
     if (this.buffer.length === 0) return
 
     const batch = this.buffer.splice(0)
@@ -729,26 +753,29 @@ export class Coordinator {
       return
     }
 
+    // Chain on the gateway queue to prevent concurrent triggerAgent() calls
     this._busy = true
-    try {
-      const replies = await this.gateway.triggerAgent(batchText)
-      // Wake only if the agent actually produced speech — avoids waking the bot
-      // visually when the agent decides not to reply.
-      const hasSpeech = replies.some(r => {
-        const t = r.trim()
-        return t.length >= 3 && !t.includes('HEARTBEAT_OK') && !/^\d{3}\s/.test(t) && !t.includes('status code')
-      })
-      if (hasSpeech) {
-        if (this._state !== 'active') this.wake()
-        else this.resetActivity()
+    this._gatewayQueue = this._gatewayQueue.then(async () => {
+      this._busy = true
+      try {
+        const replies = await this.gateway!.triggerAgent(batchText)
+        // Wake only if the agent actually produced speech — avoids waking the bot
+        // visually when the agent decides not to reply.
+        const hasSpeech = replies.some(r => {
+          const t = r.trim()
+          return t.length >= 3 && !t.includes('HEARTBEAT_OK') && !/^\d{3}\s/.test(t) && !t.includes('status code')
+        })
+        if (hasSpeech) {
+          if (this._state !== 'active') this.wake()
+          else this.resetActivity()
+        }
+        await this.handleTextReplies(replies, batch)
+      } catch (err) {
+        this.logger.error('[Coordinator] Failed to trigger agent:', err)
+      } finally {
+        this._busy = false
       }
-      await this.handleTextReplies(replies, batch)
-    } catch (err) {
-      // Log and continue - don't retry, next batch will work if gateway recovers
-      this.logger.error('[Coordinator] Failed to trigger agent:', err)
-    } finally {
-      this._busy = false
-    }
+    }).catch(() => {})
   }
 
   /**

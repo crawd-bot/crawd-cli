@@ -178,15 +178,14 @@ export class CrawdBackend {
     this.coordinator?.notifySpeech()
 
     const id = randomUUID()
-    this.generateTTSWithFallback(text, this.config.tts.bot)
-      .then((ttsUrl) => {
-        this.logger.info(`TTS generated: ${ttsUrl}`)
-        this.io.emit('crawd:talk', { id, message: text, ttsUrl })
-      })
-      .catch((e) => {
-        this.logger.error('Failed to generate TTS, emitting without audio', e)
-        this.io.emit('crawd:talk', { id, message: text, ttsUrl: '' })
-      })
+    try {
+      const ttsUrl = await this.generateTTSWithFallback(text, this.config.tts.bot)
+      this.logger.info(`TTS generated: ${ttsUrl}`)
+      this.io.emit('crawd:talk', { id, message: text, ttsUrl })
+    } catch (e) {
+      this.logger.error('Failed to generate TTS, emitting without audio', e)
+      this.io.emit('crawd:talk', { id, message: text, ttsUrl: '' })
+    }
 
     return { spoken: true }
   }
@@ -227,18 +226,6 @@ export class CrawdBackend {
     return { spoken: true }
   }
 
-  /** Emit a notification on the livestream overlay. */
-  async handleNotification(body: string): Promise<{ ok: boolean }> {
-    let ttsUrl: string | null = null
-    try {
-      ttsUrl = await this.generateTTSWithFallback(body, this.config.tts.bot)
-    } catch (e) {
-      this.logger.error('Failed to generate notification TTS', e)
-    }
-    this.io.emit('crawd:notification', { body, ttsUrl })
-    return { ok: true }
-  }
-
   getIO(): Server {
     return this.io
   }
@@ -273,7 +260,7 @@ export class CrawdBackend {
     if (!this.openai) throw new Error('OpenAI not configured (missing apiKey)')
 
     const response = await this.openai.audio.speech.create({
-      model: 'tts-1-hd',
+      model: 'gpt-4o-mini-tts',
       voice: voice as 'onyx',
       input: text,
     })
@@ -426,17 +413,6 @@ export class CrawdBackend {
         }
         await this.handleTalk(message)
         return { ok: true }
-      },
-    )
-
-    this.fastify.post<{ Body: { body: string } }>(
-      '/notification',
-      async (request, reply) => {
-        const { body } = request.body
-        if (!body || typeof body !== 'string') {
-          return reply.status(400).send({ error: 'body is required' })
-        }
-        return await this.handleNotification(body)
       },
     )
 
