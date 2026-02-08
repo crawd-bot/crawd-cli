@@ -373,7 +373,9 @@ export class OneShotGateway {
     private url: string,
     private token: string,
     private sessionKey: string = SESSION_KEY,
-  ) {}
+  ) {
+    console.log(`[OneShotGateway] url=${url} session=${sessionKey}`)
+  }
 
   async triggerAgent(message: string): Promise<string[]> {
     return new Promise((resolve, reject) => {
@@ -395,11 +397,15 @@ export class OneShotGateway {
         settled = true
         clearTimeout(timeout)
         ws.close()
-        if (error) reject(error)
-        else resolve(result ?? [])
+        if (error) {
+          console.error(`[OneShotGateway] error: ${error.message}`)
+          reject(error)
+        } else {
+          resolve(result ?? [])
+        }
       }
 
-      ws.on('open', () => {
+      const sendConnect = () => {
         ws.send(JSON.stringify({
           type: 'req',
           id: authId,
@@ -408,27 +414,32 @@ export class OneShotGateway {
             minProtocol: 3,
             maxProtocol: 3,
             client: {
-              id: 'crawd-oneshot',
+              id: 'gateway-client',
               version: '1.0.0',
               platform: 'node',
               mode: 'backend',
             },
             commands: ['talk'],
-            auth: { token: this.token },
+            auth: this.token ? { token: this.token } : {},
           },
         }))
-      })
+      }
 
       ws.on('message', (data) => {
         try {
           const frame = JSON.parse(data.toString()) as GatewayFrame
+
+          // Gateway sends connect.challenge before accepting connect requests
+          if (frame.type === 'event' && (frame as any).event === 'connect.challenge') {
+            sendConnect()
+            return
+          }
 
           if (frame.type === 'res' && frame.id === authId) {
             if (frame.error) {
               finish(undefined, new Error(`Gateway auth failed: ${frame.error.message}`))
               return
             }
-            // Authenticated — send agent request
             ws.send(JSON.stringify({
               type: 'req',
               id: agentId,
@@ -444,17 +455,14 @@ export class OneShotGateway {
               finish(undefined, new Error(`Gateway agent request failed: ${frame.error.message}`))
               return
             }
-            if (frame.payload?.status === 'accepted') {
-              // Intermediate — wait for final response
-              return
-            }
-            // Final response
+            if (frame.payload?.status === 'accepted') return
             const payloads = (frame.payload as any)?.result?.payloads as Array<{ text?: string }> | undefined
             const texts = payloads
               ?.map(p => p.text)
               .filter((t): t is string => typeof t === 'string' && t.length > 0) ?? []
             finish(texts)
           }
+          // Ignore other frames (health, agent stream events, etc.)
         } catch {
           // Parse error — ignore
         }

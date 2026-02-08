@@ -49,10 +49,27 @@ function parseTtsChain(raw: unknown): TtsVoiceEntry[] {
 }
 
 /** Resolve gateway WebSocket URL from env/defaults (same logic as OpenClaw's callGateway) */
-function resolveGatewayUrl(): string {
+function resolveGatewayUrl(port?: number): string {
+  if (port) return `ws://127.0.0.1:${port}`
   const portRaw = process.env.OPENCLAW_GATEWAY_PORT?.trim()
-  const port = portRaw ? parseInt(portRaw, 10) || 18789 : 18789
-  return `ws://127.0.0.1:${port}`
+  const resolved = portRaw ? parseInt(portRaw, 10) || 18789 : 18789
+  return `ws://127.0.0.1:${resolved}`
+}
+
+/**
+ * Read gateway auth + port from the OpenClaw host config.
+ * The real PluginApi has a `config: OpenClawConfig` property — our minimal
+ * inline type omits it so we access it via casting.
+ */
+function resolveGatewayFromHost(api: PluginApi): { token?: string; port?: number } {
+  const oclConfig = (api as Record<string, unknown>).config as Record<string, unknown> | undefined
+  if (!oclConfig) return {}
+  const gw = (oclConfig.gateway ?? {}) as Record<string, unknown>
+  const auth = (gw.auth ?? {}) as Record<string, unknown>
+  return {
+    token: typeof auth.token === 'string' ? auth.token : undefined,
+    port: typeof gw.port === 'number' ? gw.port : undefined,
+  }
 }
 
 function parsePluginConfig(raw: Record<string, unknown> | undefined): CrawdConfig {
@@ -151,6 +168,18 @@ const plugin: PluginDefinition = {
       api.logger.info('crawd: disabled')
       return
     }
+
+    // Resolve gateway auth from OpenClaw host config (token lives there, not in env)
+    const hostGw = resolveGatewayFromHost(api)
+    if (!config.gatewayToken && hostGw.token) {
+      config.gatewayToken = hostGw.token
+      api.logger.info('crawd: resolved gateway token from host config')
+    }
+    if (hostGw.port && !process.env.OPENCLAW_GATEWAY_PORT) {
+      config.gatewayUrl = resolveGatewayUrl(hostGw.port)
+    }
+
+    api.logger.info(`crawd: gateway url=${config.gatewayUrl}, token=${config.gatewayToken ? 'set' : '(none — gateway may not require auth in local mode)'}`)
 
     let backend: CrawdBackend | null = null
     let backendPromise: Promise<CrawdBackend> | null = null
