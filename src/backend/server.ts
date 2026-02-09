@@ -432,6 +432,11 @@ export class CrawdBackend {
         socket.emit('crawd:mcap', { mcap: this.latestMcap })
       }
 
+      // Sync current coordinator state so the overlay knows the initial animation
+      if (this.coordinator) {
+        socket.emit('crawd:status', { status: this.coordinator.state })
+      }
+
       socket.on('crawd:talk:done', (data: { id?: string }) => {
         if (data?.id) {
           this.logger.info(`Talk ack received: ${data.id}`)
