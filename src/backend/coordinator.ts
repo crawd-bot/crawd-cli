@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto'
 import WebSocket from 'ws'
 import type { ChatMessage } from '../lib/chat/types'
 
-const DEFAULT_BATCH_WINDOW_MS = 20_000
+const BATCH_WINDOW_MS = 20_000
 const SESSION_KEY = process.env.CRAWD_CHANNEL_ID || 'agent:main:crawd:live'
 
 /** Coordinator configuration */
@@ -15,8 +15,6 @@ export type CoordinatorConfig = {
   idleAfterMs: number
   /** Go sleep after this much inactivity while idle (ms). Default: 60000 (1 min) */
   sleepAfterIdleMs: number
-  /** Chat message batching window (ms). Default: 20000 (20 sec) */
-  chatBatchWindowMs: number
   /** The autonomous "vibe" prompt sent periodically */
   vibePrompt: string
 }
@@ -26,7 +24,6 @@ export const DEFAULT_CONFIG: CoordinatorConfig = {
   vibeIntervalMs: 30_000,
   idleAfterMs: 180_000,
   sleepAfterIdleMs: 180_000,
-  chatBatchWindowMs: DEFAULT_BATCH_WINDOW_MS,
   vibePrompt: `[CRAWD:VIBE] You are on a livestream. Make sure the crawd skill is loaded. Do one thing on the internet or ask the chat something. Respond with LIVESTREAM_REPLIED after using a tool, or NO_REPLY if you have nothing to say.`,
 }
 
@@ -557,7 +554,6 @@ export class Coordinator {
     this.config = { ...this.config, ...config }
     this.logger.log('[Coordinator] Config updated:', {
       vibeIntervalMs: this.config.vibeIntervalMs,
-      chatBatchWindowMs: this.config.chatBatchWindowMs,
       idleAfterMs: this.config.idleAfterMs,
       sleepAfterIdleMs: this.config.sleepAfterIdleMs,
     })
@@ -840,7 +836,7 @@ export class Coordinator {
     // Leading edge: if no timer running, flush immediately and start cooldown
     if (!this.timer) {
       this.flush()
-      this.timer = this.clock.setTimeout(() => this.onCooldownEnd(), this.config.chatBatchWindowMs)
+      this.timer = this.clock.setTimeout(() => this.onCooldownEnd(), BATCH_WINDOW_MS)
     }
     // Otherwise, message is buffered and will be flushed when cooldown ends
   }
@@ -851,7 +847,7 @@ export class Coordinator {
     // If messages accumulated during cooldown, flush them and restart cooldown
     if (this.buffer.length > 0) {
       this.flush()
-      this.timer = this.clock.setTimeout(() => this.onCooldownEnd(), this.config.chatBatchWindowMs)
+      this.timer = this.clock.setTimeout(() => this.onCooldownEnd(), BATCH_WINDOW_MS)
     }
   }
 

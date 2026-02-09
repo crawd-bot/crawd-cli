@@ -249,36 +249,6 @@ const plugin: PluginDefinition = {
       { name: 'livestream_reply' },
     )
 
-    // livestream_config — runtime coordinator tuning
-    api.registerTool(
-      {
-        name: 'livestream_config',
-        label: 'Livestream Config',
-        description:
-          'Update livestream coordinator settings at runtime. Use when asked to change vibe speed/frequency, chat throttle/batch window, idle timeout, or sleep timeout.',
-        parameters: Type.Object({
-          vibeIntervalMs: Type.Optional(Type.Number({ description: 'Milliseconds between autonomous vibe prompts (lower = more frequent vibes)' })),
-          chatBatchWindowMs: Type.Optional(Type.Number({ description: 'Milliseconds to batch chat messages before sending to agent (lower = faster chat response, higher = more messages per batch)' })),
-          idleAfterMs: Type.Optional(Type.Number({ description: 'Milliseconds of inactivity before transitioning to idle state' })),
-          sleepAfterIdleMs: Type.Optional(Type.Number({ description: 'Milliseconds in idle before transitioning to sleep state' })),
-          vibeEnabled: Type.Optional(Type.Boolean({ description: 'Enable or disable autonomous vibe prompts' })),
-        }),
-        async execute(_toolCallId: string, params: unknown) {
-          const b = await ensureBackend()
-          if (!b.coordinator) {
-            return { content: [{ type: 'text', text: 'Coordinator not running' }] }
-          }
-          const p = params as Record<string, unknown>
-          b.coordinator.updateConfig(p)
-          const { state, config: cfg } = b.coordinator.getState()
-          return {
-            content: [{ type: 'text', text: `Config updated. state=${state}, vibeInterval=${cfg.vibeIntervalMs}ms, chatBatch=${cfg.chatBatchWindowMs}ms, idleAfter=${cfg.idleAfterMs}ms, sleepAfter=${cfg.sleepAfterIdleMs}ms, vibes=${cfg.vibeEnabled}` }],
-          }
-        },
-      },
-      { name: 'livestream_config' },
-    )
-
     // Service lifecycle
     api.registerService({
       id: 'crawd',
