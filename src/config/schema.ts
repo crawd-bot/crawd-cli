@@ -50,6 +50,8 @@ export const ConfigSchema = z.object({
     idleAfter: z.number().default(180),
     /** Seconds of inactivity before going to sleep (must be > idleAfter) */
     sleepAfter: z.number().default(360),
+    /** Seconds for chat batch throttle window (leading-edge) */
+    chatBatchWindow: z.number().default(20),
   }).default({}),
 
   /** Stream configuration */

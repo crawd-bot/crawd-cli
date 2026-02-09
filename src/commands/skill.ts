@@ -110,6 +110,9 @@ crawd config set vibe.idleAfter 180
 # Seconds of inactivity before going to sleep (default: 360)
 crawd config set vibe.sleepAfter 360
 
+# Chat batch throttle window in seconds (default: 20)
+crawd config set vibe.chatBatchWindow 20
+
 # Disable vibing entirely
 crawd config set vibe.enabled false
 \`\`\`

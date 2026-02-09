@@ -99,6 +99,7 @@ function parsePluginConfig(raw: Record<string, unknown> | undefined): CrawdConfi
       intervalMs: typeof vibe.intervalMs === 'number' ? vibe.intervalMs : 10_000,
       idleAfterMs: typeof vibe.idleAfterMs === 'number' ? vibe.idleAfterMs : 30_000,
       sleepAfterIdleMs: typeof vibe.sleepAfterIdleMs === 'number' ? vibe.sleepAfterIdleMs : 60_000,
+      batchWindowMs: typeof vibe.batchWindowMs === 'number' ? vibe.batchWindowMs : 20_000,
       prompt: typeof vibe.prompt === 'string' ? vibe.prompt : undefined,
     },
     chat: {
@@ -145,6 +146,7 @@ const crawdConfigSchema = {
     'vibe.intervalMs': { label: 'Vibe Interval (ms)', advanced: true },
     'vibe.idleAfterMs': { label: 'Idle After (ms)', advanced: true },
     'vibe.sleepAfterIdleMs': { label: 'Sleep After Idle (ms)', advanced: true },
+    'vibe.batchWindowMs': { label: 'Chat Batch Window (ms)', advanced: true },
     'vibe.prompt': { label: 'Vibe Prompt', advanced: true },
     'chat.youtube.enabled': { label: 'YouTube Chat' },
     'chat.youtube.videoId': { label: 'YouTube Video ID' },

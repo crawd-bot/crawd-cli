@@ -46,6 +46,7 @@ export type CrawdConfig = {
     intervalMs: number
     idleAfterMs: number
     sleepAfterIdleMs: number
+    batchWindowMs: number
     prompt?: string
   }
   chat: {
@@ -391,6 +392,7 @@ export class CrawdBackend {
         vibeIntervalMs: this.config.vibe.intervalMs,
         idleAfterMs: this.config.vibe.idleAfterMs,
         sleepAfterIdleMs: this.config.vibe.sleepAfterIdleMs,
+        batchWindowMs: this.config.vibe.batchWindowMs,
       }
       if (this.config.vibe.prompt) {
         coordConfig.vibePrompt = this.config.vibe.prompt
@@ -625,6 +627,7 @@ export function configFromEnv(): CrawdConfig {
       intervalMs: Number(process.env.VIBE_INTERVAL_MS || 30_000),
       idleAfterMs: Number(process.env.IDLE_AFTER_MS || 180_000),
       sleepAfterIdleMs: Number(process.env.SLEEP_AFTER_IDLE_MS || 180_000),
+      batchWindowMs: Number(process.env.CHAT_BATCH_WINDOW_MS || 20_000),
       prompt: process.env.VIBE_PROMPT,
     },
     chat: {

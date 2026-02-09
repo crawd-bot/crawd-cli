@@ -54,6 +54,7 @@ function buildEnv(config: Config): NodeJS.ProcessEnv {
   env.VIBE_INTERVAL_MS = String(config.vibe.interval * 1000)
   env.IDLE_AFTER_MS = String(config.vibe.idleAfter * 1000)
   env.SLEEP_AFTER_IDLE_MS = String((config.vibe.sleepAfter - config.vibe.idleAfter) * 1000)
+  env.CHAT_BATCH_WINDOW_MS = String(config.vibe.chatBatchWindow * 1000)
 
   env.YOUTUBE_ENABLED = String(config.chat.youtube.enabled)
   if (config.chat.youtube.videoId) {
