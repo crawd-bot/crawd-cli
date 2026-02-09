@@ -24,7 +24,7 @@ export const DEFAULT_CONFIG: CoordinatorConfig = {
   vibeIntervalMs: 30_000,
   idleAfterMs: 180_000,
   sleepAfterIdleMs: 180_000,
-  vibePrompt: `[VIBE] Do one thing on the internet or ask the chat something.`,
+  vibePrompt: `[VIBE] You are on a livestream. Make sure the crawd skill is loaded. Do one thing on the internet or ask the chat something.`,
 }
 
 export type CoordinatorState = 'sleep' | 'idle' | 'active'
@@ -759,10 +759,15 @@ export class Coordinator {
 
     // Chain on the gateway queue to prevent concurrent triggerAgent() calls
     this._busy = true
+    let noReply = false
     const vibeOp = this._gatewayQueue.then(async () => {
       this._busy = true
       try {
-        await this.triggerFn(this.config.vibePrompt)
+        const replies = await this.triggerFn(this.config.vibePrompt)
+        // Agent sends NO_REPLY when it has nothing to do — go to sleep
+        if (replies.some(r => r.trim().toUpperCase().includes('NO_REPLY'))) {
+          noReply = true
+        }
       } catch (err) {
         this.logger.error('[Coordinator] Vibe failed:', err)
       } finally {
@@ -774,6 +779,12 @@ export class Coordinator {
     try {
       await vibeOp
     } catch {}
+
+    if (noReply) {
+      this.logger.log('[Coordinator] Agent sent NO_REPLY, going to sleep')
+      this.goSleep()
+      return
+    }
 
     // Schedule next vibe
     this.scheduleNextVibe()
