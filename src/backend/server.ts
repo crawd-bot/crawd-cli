@@ -96,6 +96,10 @@ export class CrawdBackend {
   private latestMcap: number | null = null
   private mcapInterval: NodeJS.Timeout | null = null
 
+  /** Pending overlay acks — resolves when overlay finishes playing audio for a given event ID */
+  private pendingAcks = new Map<string, { resolve: () => void; timer: ReturnType<typeof setTimeout> }>()
+  private static readonly ACK_TIMEOUT_MS = 60_000
+
   constructor(config: CrawdConfig, logger?: CrawdLogger) {
     this.config = config
     this.logger = logger ?? defaultLogger
@@ -169,7 +173,7 @@ export class CrawdBackend {
   // Public API (used by plugin tool handlers)
   // =========================================================================
 
-  /** Speak on the livestream — emits overlay event + TTS. */
+  /** Speak on the livestream — emits overlay event + TTS. Blocks until overlay finishes playing. */
   async handleTalk(text: string): Promise<{ spoken: boolean }> {
     if (!text || typeof text !== 'string') {
       return { spoken: false }
@@ -179,20 +183,22 @@ export class CrawdBackend {
 
     const id = randomUUID()
     try {
-      const ttsUrl = await this.generateTTSWithFallback(text, this.config.tts.bot)
-      this.logger.info(`TTS generated: ${ttsUrl}`)
-      this.io.emit('crawd:talk', { id, message: text, ttsUrl })
+      const tts = await this.generateTTSWithFallback(text, this.config.tts.bot)
+      this.logger.info(`TTS generated: ${tts.url}`)
+      this.io.emit('crawd:talk', { id, message: text, ttsUrl: tts.url, ttsProvider: tts.provider })
     } catch (e) {
       this.logger.error('Failed to generate TTS, emitting without audio', e)
       this.io.emit('crawd:talk', { id, message: text, ttsUrl: '' })
     }
 
+    await this.waitForAck(id)
     return { spoken: true }
   }
 
   /**
    * Reply to a chat message — reads original aloud (chat voice),
    * then speaks bot reply (bot voice). Emits `crawd:reply-turn`.
+   * Blocks until overlay finishes playing both audios.
    */
   async handleReply(
     text: string,
@@ -204,25 +210,32 @@ export class CrawdBackend {
 
     this.coordinator?.notifySpeech()
 
+    const id = randomUUID()
     try {
-      const [chatTtsUrl, botTtsUrl] = await Promise.all([
+      const [chatTts, botTts] = await Promise.all([
         this.generateTTSWithFallback(`Chat says: ${chat.message}`, this.config.tts.chat),
         this.generateTTSWithFallback(text, this.config.tts.bot),
       ])
       this.io.emit('crawd:reply-turn', {
+        id,
         chat: { username: chat.username, message: chat.message },
         botMessage: text,
-        chatTtsUrl,
-        botTtsUrl,
+        chatTtsUrl: chatTts.url,
+        botTtsUrl: botTts.url,
+        chatTtsProvider: chatTts.provider,
+        botTtsProvider: botTts.provider,
       })
     } catch (e) {
       this.logger.error('Failed to generate reply-turn TTS, falling back to talk', e)
-      const id = randomUUID()
-      this.generateTTSWithFallback(text, this.config.tts.bot)
-        .then((ttsUrl) => this.io.emit('crawd:talk', { id, message: text, ttsUrl }))
-        .catch(() => this.io.emit('crawd:talk', { id, message: text, ttsUrl: '' }))
+      try {
+        const tts = await this.generateTTSWithFallback(text, this.config.tts.bot)
+        this.io.emit('crawd:talk', { id, message: text, ttsUrl: tts.url, ttsProvider: tts.provider })
+      } catch {
+        this.io.emit('crawd:talk', { id, message: text, ttsUrl: '' })
+      }
     }
 
+    await this.waitForAck(id)
     return { spoken: true }
   }
 
@@ -230,23 +243,50 @@ export class CrawdBackend {
     return this.io
   }
 
+  /** Wait for overlay to ack that audio finished playing. Resolves on timeout as fallback. */
+  private waitForAck(id: string): Promise<void> {
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.pendingAcks.delete(id)
+        this.logger.warn(`Talk ack timed out (${id}), resolving anyway`)
+        resolve()
+      }, CrawdBackend.ACK_TIMEOUT_MS)
+      this.pendingAcks.set(id, { resolve, timer })
+    })
+  }
+
+  /** Resolve a pending ack (called when overlay sends crawd:talk:done) */
+  private resolveAck(id: string): void {
+    const pending = this.pendingAcks.get(id)
+    if (pending) {
+      clearTimeout(pending.timer)
+      this.pendingAcks.delete(id)
+      pending.resolve()
+    }
+  }
+
   // =========================================================================
   // TTS (with ordered fallback chain)
   // =========================================================================
 
-  async generateTTSWithFallback(text: string, chain: TtsVoiceEntry[]): Promise<string> {
+  async generateTTSWithFallback(text: string, chain: TtsVoiceEntry[]): Promise<{ url: string; provider: TtsVoiceEntry['provider'] }> {
     let lastError: Error | null = null
 
     for (const entry of chain) {
       try {
+        let url: string
         switch (entry.provider) {
           case 'elevenlabs':
-            return await this.generateElevenLabsTTS(text, entry.voice)
+            url = await this.generateElevenLabsTTS(text, entry.voice)
+            break
           case 'openai':
-            return await this.generateOpenAITTS(text, entry.voice)
+            url = await this.generateOpenAITTS(text, entry.voice)
+            break
           case 'tiktok':
-            return await this.generateTikTokTTSFile(text, entry.voice)
+            url = await this.generateTikTokTTSFile(text, entry.voice)
+            break
         }
+        return { url, provider: entry.provider }
       } catch (e) {
         lastError = e instanceof Error ? e : new Error(String(e))
         this.logger.warn(`TTS ${entry.provider}/${entry.voice} failed: ${lastError.message}, trying next...`)
@@ -392,6 +432,13 @@ export class CrawdBackend {
         socket.emit('crawd:mcap', { mcap: this.latestMcap })
       }
 
+      socket.on('crawd:talk:done', (data: { id?: string }) => {
+        if (data?.id) {
+          this.logger.info(`Talk ack received: ${data.id}`)
+          this.resolveAck(data.id)
+        }
+      })
+
       socket.on('crawd:mock-chat', (data: { username?: string; message?: string }) => {
         const { username, message } = data
         if (!username || !message) return
@@ -491,15 +538,18 @@ export class CrawdBackend {
         }
 
         try {
-          const [chatTtsUrl, botTtsUrl] = await Promise.all([
+          const [chatTts, botTts] = await Promise.all([
             this.generateTTSWithFallback(`Chat says: ${message}`, this.config.tts.chat),
             this.generateTTSWithFallback(response, this.config.tts.bot),
           ])
           this.io.emit('crawd:reply-turn', {
+            id: randomUUID(),
             chat: { username, message },
             botMessage: response,
-            chatTtsUrl,
-            botTtsUrl,
+            chatTtsUrl: chatTts.url,
+            botTtsUrl: botTts.url,
+            chatTtsProvider: chatTts.provider,
+            botTtsProvider: botTts.provider,
           })
           return { ok: true }
         } catch (e) {

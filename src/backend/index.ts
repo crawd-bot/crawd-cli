@@ -551,6 +551,7 @@ async function main() {
         ]);
 
         const event: ReplyTurnEvent = {
+          id: randomUUID(),
           chat: { username, message },
           botMessage: response,
           chatTtsUrl,

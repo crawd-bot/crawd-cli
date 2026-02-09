@@ -24,7 +24,7 @@ export const DEFAULT_CONFIG: CoordinatorConfig = {
   vibeIntervalMs: 30_000,
   idleAfterMs: 180_000,
   sleepAfterIdleMs: 180_000,
-  vibePrompt: `[VIBE] You are on a livestream. Make sure the crawd skill is loaded. Do one thing on the internet or ask the chat something.`,
+  vibePrompt: `[CRAWD:VIBE] You are on a livestream. Make sure the crawd skill is loaded. Do one thing on the internet or ask the chat something. Respond with LIVESTREAM_REPLIED after using a tool, or NO_REPLY if you have nothing to say.`,
 }
 
 export type CoordinatorState = 'sleep' | 'idle' | 'active'
@@ -760,13 +760,18 @@ export class Coordinator {
     // Chain on the gateway queue to prevent concurrent triggerAgent() calls
     this._busy = true
     let noReply = false
+    let misaligned: string[] = []
     const vibeOp = this._gatewayQueue.then(async () => {
       this._busy = true
       try {
         const replies = await this.triggerFn(this.config.vibePrompt)
-        // Agent sends NO_REPLY when it has nothing to do — go to sleep
-        if (replies.some(r => r.trim().toUpperCase().includes('NO_REPLY'))) {
+        if (replies.some(r => r.trim().toUpperCase() === 'NO_REPLY')) {
           noReply = true
+        } else if (!this.isCompliantReply(replies)) {
+          misaligned = replies.filter(r => {
+            const t = r.trim().toUpperCase()
+            return t !== 'NO_REPLY' && t !== 'LIVESTREAM_REPLIED'
+          })
         }
       } catch (err) {
         this.logger.error('[Coordinator] Vibe failed:', err)
@@ -784,6 +789,10 @@ export class Coordinator {
       this.logger.log('[Coordinator] Agent sent NO_REPLY, going to sleep')
       this.goSleep()
       return
+    }
+
+    if (misaligned.length > 0) {
+      this._gatewayQueue = this._gatewayQueue.then(() => this.sendMisalignment(misaligned)).catch(() => {})
     }
 
     // Schedule next vibe
@@ -840,6 +849,31 @@ export class Coordinator {
   /** Whether the coordinator is busy processing a flush or talk */
   get busy(): boolean { return this._busy }
 
+  /** Check if agent replies are compliant (NO_REPLY or LIVESTREAM_REPLIED) */
+  private isCompliantReply(replies: string[]): boolean {
+    if (replies.length === 0) return true
+    return replies.every(r => {
+      const t = r.trim().toUpperCase()
+      return t === 'NO_REPLY' || t === 'LIVESTREAM_REPLIED'
+    })
+  }
+
+  /** Send misalignment correction when agent responds with plaintext */
+  private async sendMisalignment(badReplies: string[]): Promise<void> {
+    const leaked = badReplies.map(r => `"${r.slice(0, 80)}"`).join(', ')
+    this.logger.warn(`[Coordinator] MISALIGNED — agent sent plaintext: ${leaked}`)
+    try {
+      await this.triggerFn(
+        `[CRAWD:MISALIGNED] Your previous response was plaintext: ${leaked}. ` +
+        `Plaintext is NEVER visible to viewers. You MUST use livestream_reply or livestream_talk tool calls to speak. ` +
+        `After using a tool, respond with LIVESTREAM_REPLIED. If you have nothing to say, respond with NO_REPLY. ` +
+        `Do not respond with any other text.`
+      )
+    } catch (err) {
+      this.logger.error('[Coordinator] Misalignment correction failed:', err)
+    }
+  }
+
   private flush(): void {
     if (this.buffer.length === 0) return
 
@@ -854,7 +888,13 @@ export class Coordinator {
     this._gatewayQueue = this._gatewayQueue.then(async () => {
       this._busy = true
       try {
-        await this.triggerFn(batchText)
+        const replies = await this.triggerFn(batchText)
+        if (!this.isCompliantReply(replies)) {
+          await this.sendMisalignment(replies.filter(r => {
+            const t = r.trim().toUpperCase()
+            return t !== 'NO_REPLY' && t !== 'LIVESTREAM_REPLIED'
+          }))
+        }
       } catch (err) {
         this.logger.error('[Coordinator] Failed to trigger agent:', err)
       } finally {
@@ -868,7 +908,7 @@ export class Coordinator {
       ? Math.round((this.clock.now() - (messages[0].timestamp ?? this.clock.now())) / 1000)
       : 0
 
-    const header = `[CHAT - ${messages.length} message${messages.length === 1 ? '' : 's'}${duration > 0 ? `, ${duration}s` : ''}]`
+    const header = `[CRAWD:CHAT - ${messages.length} message${messages.length === 1 ? '' : 's'}${duration > 0 ? `, ${duration}s` : ''}]`
     const lines = messages.map(m => {
       const platform = m.platform && m.platform !== 'pumpfun' ? `[${m.platform.toUpperCase()}] ` : ''
       return `[${m.shortId}] ${platform}${m.username}: ${m.message}`
