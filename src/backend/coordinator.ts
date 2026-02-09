@@ -765,13 +765,18 @@ export class Coordinator {
       this._busy = true
       try {
         const replies = await this.triggerFn(this.config.vibePrompt)
-        if (replies.some(r => r.trim().toUpperCase() === 'NO_REPLY')) {
+        // Filter out API errors (429s, rate limits) — not agent responses
+        const agentReplies = replies.filter(r => !this.isApiError(r))
+        if (agentReplies.some(r => r.trim().toUpperCase() === 'NO_REPLY')) {
           noReply = true
-        } else if (!this.isCompliantReply(replies)) {
-          misaligned = replies.filter(r => {
+        } else if (!this.isCompliantReply(agentReplies)) {
+          misaligned = agentReplies.filter(r => {
             const t = r.trim().toUpperCase()
             return t !== 'NO_REPLY' && t !== 'LIVESTREAM_REPLIED'
           })
+        }
+        if (replies.length > agentReplies.length) {
+          this.logger.warn(`[Coordinator] Filtered ${replies.length - agentReplies.length} API error(s) from vibe response`)
         }
       } catch (err) {
         this.logger.error('[Coordinator] Vibe failed:', err)
@@ -849,12 +854,19 @@ export class Coordinator {
   /** Whether the coordinator is busy processing a flush or talk */
   get busy(): boolean { return this._busy }
 
+  /** Detect API/gateway errors surfaced as reply strings (e.g. rate limits) */
+  private static readonly API_ERROR_RE = /^\d{3}\s+(status\s+code|error)|^rate\s*limit|^too\s+many\s+requests|^overloaded|^server\s+error/i
+
+  private isApiError(reply: string): boolean {
+    return Coordinator.API_ERROR_RE.test(reply.trim())
+  }
+
   /** Check if agent replies are compliant (NO_REPLY or LIVESTREAM_REPLIED) */
   private isCompliantReply(replies: string[]): boolean {
     if (replies.length === 0) return true
     return replies.every(r => {
       const t = r.trim().toUpperCase()
-      return t === 'NO_REPLY' || t === 'LIVESTREAM_REPLIED'
+      return t === 'NO_REPLY' || t === 'LIVESTREAM_REPLIED' || this.isApiError(r)
     })
   }
 
@@ -889,8 +901,12 @@ export class Coordinator {
       this._busy = true
       try {
         const replies = await this.triggerFn(batchText)
-        if (!this.isCompliantReply(replies)) {
-          await this.sendMisalignment(replies.filter(r => {
+        const agentReplies = replies.filter(r => !this.isApiError(r))
+        if (replies.length > agentReplies.length) {
+          this.logger.warn(`[Coordinator] Filtered ${replies.length - agentReplies.length} API error(s) from chat response`)
+        }
+        if (!this.isCompliantReply(agentReplies)) {
+          await this.sendMisalignment(agentReplies.filter(r => {
             const t = r.trim().toUpperCase()
             return t !== 'NO_REPLY' && t !== 'LIVESTREAM_REPLIED'
           }))
