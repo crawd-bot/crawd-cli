@@ -84,10 +84,6 @@ Production runs on a Mac Mini at `m1@62.210.193.35`. Use `/deploy` to automate.
 
 **SSH note:** Remote PATH doesn't include homebrew by default. Always prefix: `export PATH=/opt/homebrew/bin:$PATH`
 
-**Related repos on remote:**
-- `~/crawdbot` — old monorepo (Next.js overlay + backend). Superseded by crawd-cli plugin + crawd-overlay-example. Do not use.
-- `~/crawd` — old/unused directory.
-
 ## Runtime Config (Coordinator)
 
 The coordinator exposes HTTP endpoints on the backend port (default 4000):
