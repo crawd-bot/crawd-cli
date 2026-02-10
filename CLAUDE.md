@@ -2,15 +2,19 @@
 
 AI agent livestreaming platform. OpenClaw plugin + CLI that lets autonomous AI agents stream on Twitch/YouTube with real-time chat interaction, TTS voice, and OBS overlays.
 
+## CLAUDE.md Management
+
+Keep this file up to date. When you discover new patterns, deployment steps, gotchas, or architectural decisions during a session, proactively suggest updating CLAUDE.md before the session ends. This file is the single source of truth across sessions — if something caused confusion or wasted time, document it here so it doesn't happen again.
+
 ## Architecture
 
 **OpenClaw Plugin** (`src/plugin.ts`) — Primary integration point. Registers two tools:
 - `livestream_talk` — Unprompted speech (narration, vibes, commentary)
 - `livestream_reply` — Reply to a chat message (plays original then bot reply)
 
-**CrawdBackend** (`src/backend/server.ts`) — Fastify + Socket.IO server. Handles TTS generation, chat integration, overlay events, and the coordinator state machine. Lazily started on first tool use.
+**CrawdBackend** (`src/backend/server.ts`) — Fastify + Socket.IO server. Handles TTS generation, chat integration, overlay events, and the coordinator state machine. Started as a background service when the plugin is loaded by OpenClaw.
 
-**Coordinator** (`src/backend/coordinator.ts`) — Autonomous state machine (sleep → idle → active). Manages vibe loop, chat batching (20s window, leading-edge throttle), and gateway WebSocket connection.
+**Coordinator** (`src/backend/coordinator.ts`) — Autonomous state machine (sleep → idle → active). Manages vibe loop, chat batching (configurable, default 20s window, leading-edge throttle), and gateway WebSocket connection.
 
 **CLI** (`src/cli.ts`) — Commander.js commands: `auth`, `start`, `stop`, `talk`, `status`, `logs`, `config`, `stream-key`, `skill`, `update`.
 
@@ -33,7 +37,7 @@ src/
   backend/
     server.ts         # CrawdBackend class (Fastify + Socket.IO)
     coordinator.ts    # State machine, vibe loop, gateway client
-    index.ts          # Standalone backend (legacy)
+    index.ts          # Standalone backend entry (for direct `bun run`)
   commands/           # CLI command implementations
   config/
     schema.ts         # Zod config schema
@@ -44,7 +48,8 @@ src/
     tts/tiktok.ts     # TikTok TTS provider (vendored)
   daemon/             # Daemon lifecycle & PID management
   utils/              # Paths (~/.crawd/*), logger
-skills/livestream/    # Agent behavior guidelines (SKILL.md)
+skills/crawd/         # Agent behavior guidelines (SKILL.md)
+.claude/commands/     # Project-local slash commands (/deploy)
 openclaw.plugin.json  # Plugin manifest with configSchema & uiHints
 ```
 
@@ -66,6 +71,40 @@ Fallback chain per voice type (chat vs bot):
 2. **ElevenLabs** (multilingual_v2) — Needs `ELEVENLABS_API_KEY`
 3. **TikTok** — Free, vendored, needs `TIKTOK_SESSION_ID`
 
+## Remote Deployment (Mac Mini)
+
+Production runs on a Mac Mini at `m1@62.210.193.35`. Use `/deploy` to automate.
+
+**What runs on remote:**
+- **OpenClaw Gateway** (`openclaw gateway run --port 18789`) — the agent runtime
+- **crawd plugin** — installed at `~/openclaw-plugins/node_modules/crawd`, loaded by gateway via `~/.openclaw/openclaw.json`
+- **crawd-overlay-example** — Vite dev server at `~/crawd-overlay-example` (serves OBS browser source)
+
+**Config:** All plugin config (TTS keys, vibe settings, chat sources) lives in `~/.openclaw/openclaw.json` under `plugins.entries.crawd.config`. No separate `.env` on remote.
+
+**SSH note:** Remote PATH doesn't include homebrew by default. Always prefix: `export PATH=/opt/homebrew/bin:$PATH`
+
+**Related repos on remote:**
+- `~/crawdbot` — old monorepo (Next.js overlay + backend). Superseded by crawd-cli plugin + crawd-overlay-example. Do not use.
+- `~/crawd` — old/unused directory.
+
+## Runtime Config (Coordinator)
+
+The coordinator exposes HTTP endpoints on the backend port (default 4000):
+
+- `GET /coordinator/status` — current state + config
+- `POST /coordinator/config` — update at runtime (body: partial `CoordinatorConfig`)
+
+Configurable fields (all in ms when sent via HTTP, seconds in config schema):
+
+| Field | Config key | Default | Description |
+|-------|-----------|---------|-------------|
+| `vibeIntervalMs` | `vibe.interval` | 30s | Time between vibe pings |
+| `idleAfterMs` | `vibe.idleAfter` | 180s | Inactivity before idle |
+| `sleepAfterIdleMs` | `vibe.sleepAfter` | 360s | Idle time before sleep |
+| `batchWindowMs` | `vibe.chatBatchWindow` | 20s | Chat batch throttle window |
+| `vibeEnabled` | `vibe.enabled` | true | Toggle autonomous vibing |
+
 ## Development
 
 ```bash
@@ -75,8 +114,9 @@ pnpm build:all     # Full build (CLI + backend)
 pnpm typecheck     # tsc --noEmit
 ```
 
-- Runtime: Node.js >= 18, daemon spawned with Bun
+- Runtime: Node.js >= 18
 - ESM modules, TypeScript strict mode
+- Published to npm as `crawd` — overlay and remote plugin install from npm
 - Config: `~/.crawd/config.json` (Zod-validated), `~/.crawd/.env` (secrets)
 - Logs: `~/.crawd/logs/crawdbot.log`, PID: `~/.crawd/pids/crawdbot.pid`
 
