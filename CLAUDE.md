@@ -12,7 +12,7 @@ Keep this file up to date. When you discover new patterns, deployment steps, got
 - `livestream_talk` — Unprompted speech (narration, vibes, commentary)
 - `livestream_reply` — Reply to a chat message (plays original then bot reply)
 
-**CrawdBackend** (`src/backend/server.ts`) — Fastify + Socket.IO server. Handles TTS generation, chat integration, overlay events, and the coordinator state machine. Started as a background service when the plugin is loaded by OpenClaw.
+**CrawdBackend** (`src/backend/server.ts`) — Fastify + Socket.IO server. Handles chat integration, overlay events (text-only), and the coordinator state machine. Started as a background service when the plugin is loaded by OpenClaw. TTS generation has been moved to the overlay (Next.js server actions).
 
 **Coordinator** (`src/backend/coordinator.ts`) — Autonomous state machine (sleep → idle → active). Manages vibe loop, chat batching (configurable, default 20s window, leading-edge throttle), and gateway WebSocket connection.
 
@@ -22,8 +22,8 @@ Keep this file up to date. When you discover new patterns, deployment steps, got
 
 ```
 Chat (YouTube/PumpFun) → ChatManager → Coordinator batches → Gateway → Agent
-Agent uses livestream_reply/talk → CrawdBackend generates TTS → Socket.IO → Overlay
-Overlay plays audio → emits crawd:talk:done → Backend resolves tool call
+Agent uses livestream_reply/talk → CrawdBackend emits text-only event → Socket.IO → Overlay
+Overlay generates TTS (server action) → plays audio → emits crawd:talk:done → Backend resolves tool call
 ```
 
 ## Project Structure
@@ -45,7 +45,7 @@ src/
   lib/
     chat/             # Chat platform adapters (YouTube, PumpFun)
     pumpfun/          # PumpFun token data & market cap
-    tts/tiktok.ts     # TikTok TTS provider (vendored)
+    tts/              # (TTS moved to overlay — this dir may be empty)
   daemon/             # Daemon lifecycle & PID management
   utils/              # Paths (~/.crawd/*), logger
 skills/crawd/         # Agent behavior guidelines (SKILL.md)
@@ -57,19 +57,16 @@ openclaw.plugin.json  # Plugin manifest with configSchema & uiHints
 
 | Event | Direction | Payload |
 |-------|-----------|---------|
-| `crawd:talk` | backend → overlay | `TalkEvent` (message, ttsUrl, optional chat) |
-| `crawd:talk:done` | overlay → backend | `TalkDoneEvent` (id) — ack audio finished |
-| `crawd:reply-turn` | backend → overlay | `ReplyTurnEvent` (chat + bot with TTS) |
+| `crawd:talk` | backend → overlay | `TalkEvent` (id, message — text only) |
+| `crawd:talk:done` | overlay → backend | `TalkDoneEvent` (id) — ack after TTS/display finished |
+| `crawd:reply-turn` | backend → overlay | `ReplyTurnEvent` (id, chat, botMessage — text only) |
 | `crawd:chat` | backend → overlay | `ChatMessage` (raw chat, no TTS) |
 | `crawd:mcap` | backend → overlay | `McapEvent` (market cap update) |
 | `crawd:status` | backend → overlay | `StatusEvent` (coordinator state) |
 
-## TTS Providers
+## TTS
 
-Fallback chain per voice type (chat vs bot):
-1. **OpenAI** (tts-1-hd) — High quality, needs `OPENAI_API_KEY`
-2. **ElevenLabs** (multilingual_v2) — Needs `ELEVENLABS_API_KEY`
-3. **TikTok** — Free, vendored, needs `TIKTOK_SESSION_ID`
+TTS has been moved to the overlay (crawd-overlay-example). The backend sends text-only events. The overlay generates TTS via Next.js server actions and manages audio playback + ack flow. See the overlay project for TTS provider configuration.
 
 ## Remote Deployment (Mac Mini)
 
@@ -78,9 +75,9 @@ Production runs on a Mac Mini at `m1@62.210.193.35`. Use `/deploy` to automate.
 **What runs on remote:**
 - **OpenClaw Gateway** (`openclaw gateway run --port 18789`) — the agent runtime
 - **crawd plugin** — installed at `~/openclaw-plugins/node_modules/crawd`, loaded by gateway via `~/.openclaw/openclaw.json`
-- **crawd-overlay-example** — Vite dev server at `~/crawd-overlay-example` (serves OBS browser source)
+- **crawd-overlay-example** — Next.js dev server at `~/crawd-overlay-example` (serves OBS browser source)
 
-**Config:** All plugin config (TTS keys, vibe settings, chat sources) lives in `~/.openclaw/openclaw.json` under `plugins.entries.crawd.config`. No separate `.env` on remote.
+**Config:** Plugin config (vibe settings, chat sources) lives in `~/.openclaw/openclaw.json` under `plugins.entries.crawd.config`. TTS config lives in the overlay's `.env.local` (not in the plugin config).
 
 **SSH note:** Remote PATH doesn't include homebrew by default. Always prefix: `export PATH=/opt/homebrew/bin:$PATH`
 

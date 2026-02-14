@@ -13,41 +13,22 @@ export type {
   SuperChatInfo,
 } from './lib/chat/types'
 
-/** TTS provider identifier */
-export type TtsProvider = 'openai' | 'elevenlabs' | 'tiktok'
-
 // --- Socket.IO event payloads ---
 
-/** Turn-based reply: chat message + bot response, each with TTS audio */
+/** Turn-based reply: chat message + bot response (text only, TTS handled by overlay) */
 export type ReplyTurnEvent = {
-  /** Correlation ID — overlay sends talk:done with this ID when both audios finish */
+  /** Correlation ID — overlay sends talk:done with this ID when finished */
   id: string
   chat: { username: string; message: string }
   botMessage: string
-  chatTtsUrl: string
-  botTtsUrl: string
-  /** TTS provider used for the chat audio */
-  chatTtsProvider?: TtsProvider
-  /** TTS provider used for the bot audio */
-  botTtsProvider?: TtsProvider
 }
 
-/** Bot speech bubble with pre-generated TTS (atomic event) */
+/** Bot speech bubble (text only, TTS handled by overlay) */
 export type TalkEvent = {
-  /** Correlation ID — overlay sends talk:done with this ID when audio finishes */
+  /** Correlation ID — overlay sends talk:done with this ID when finished */
   id: string
   /** Bot reply text */
   message: string
-  /** Bot TTS audio URL */
-  ttsUrl: string
-  /** TTS provider used for the bot audio */
-  ttsProvider?: TtsProvider
-  /** Optional: chat message being replied to (overlay plays this first) */
-  chat?: {
-    message: string
-    username: string
-    ttsUrl: string
-  }
 }
 
 /** Overlay → backend acknowledgement that a talk finished playing */

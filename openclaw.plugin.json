@@ -1,7 +1,7 @@
 {
   "id": "crawd",
   "name": "Crawd Livestream",
-  "description": "crawd.bot plugin — AI agent livestreaming with TTS, chat integration, and OBS overlay",
+  "description": "crawd.bot plugin — AI agent livestreaming with chat integration and OBS overlay",
   "skills": ["./skills/crawd"],
   "configSchema": {
     "type": "object",
@@ -10,40 +10,6 @@
       "enabled": { "type": "boolean" },
       "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
       "bindHost": { "type": "string" },
-      "backendUrl": { "type": "string" },
-      "tts": {
-        "type": "object",
-        "additionalProperties": false,
-        "properties": {
-          "chat": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "provider": { "type": "string", "enum": ["openai", "elevenlabs", "tiktok"] },
-                "voice": { "type": "string" }
-              },
-              "required": ["provider", "voice"]
-            }
-          },
-          "bot": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "provider": { "type": "string", "enum": ["openai", "elevenlabs", "tiktok"] },
-                "voice": { "type": "string" }
-              },
-              "required": ["provider", "voice"]
-            }
-          },
-          "openaiApiKey": { "type": "string" },
-          "elevenlabsApiKey": { "type": "string" },
-          "tiktokSessionId": { "type": "string" }
-        }
-      },
       "vibe": {
         "type": "object",
         "additionalProperties": false,
@@ -52,6 +18,7 @@
           "intervalMs": { "type": "integer", "minimum": 1000 },
           "idleAfterMs": { "type": "integer", "minimum": 1000 },
           "sleepAfterIdleMs": { "type": "integer", "minimum": 1000 },
+          "batchWindowMs": { "type": "integer", "minimum": 1000 },
           "prompt": { "type": "string" }
         }
       },
@@ -86,16 +53,11 @@
     "enabled": { "label": "Enabled" },
     "port": { "label": "Backend Port", "placeholder": "4000" },
     "bindHost": { "label": "Bind Host", "placeholder": "0.0.0.0", "advanced": true },
-    "backendUrl": { "label": "Backend URL", "help": "Public URL for TTS file serving", "advanced": true },
-    "tts.chat": { "label": "Chat TTS Voices", "help": "Ordered fallback chain [{provider, voice}]" },
-    "tts.bot": { "label": "Bot TTS Voices", "help": "Ordered fallback chain [{provider, voice}]" },
-    "tts.openaiApiKey": { "label": "OpenAI API Key", "sensitive": true },
-    "tts.elevenlabsApiKey": { "label": "ElevenLabs API Key", "sensitive": true },
-    "tts.tiktokSessionId": { "label": "TikTok Session ID", "sensitive": true },
     "vibe.enabled": { "label": "Vibe Mode" },
     "vibe.intervalMs": { "label": "Vibe Interval (ms)", "advanced": true },
     "vibe.idleAfterMs": { "label": "Idle After (ms)", "advanced": true },
     "vibe.sleepAfterIdleMs": { "label": "Sleep After Idle (ms)", "advanced": true },
+    "vibe.batchWindowMs": { "label": "Chat Batch Window (ms)", "advanced": true },
     "vibe.prompt": { "label": "Vibe Prompt", "advanced": true },
     "chat.youtube.enabled": { "label": "YouTube Chat" },
     "chat.youtube.videoId": { "label": "YouTube Video ID" },

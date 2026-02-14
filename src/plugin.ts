@@ -7,7 +7,7 @@
  * - `crawd` service (Fastify + Socket.IO backend)
  */
 import { Type } from '@sinclair/typebox'
-import { CrawdBackend, type CrawdConfig, type TtsVoiceEntry } from './backend/server.js'
+import { CrawdBackend, type CrawdConfig } from './backend/server.js'
 
 // Minimal plugin types — the real types come from openclaw/plugin-sdk at runtime.
 // Defined inline so this package builds without the openclaw peerDep installed.
@@ -36,18 +36,6 @@ type PluginDefinition = {
 // Config parsing — transform pluginConfig → CrawdConfig
 // ---------------------------------------------------------------------------
 
-function parseTtsChain(raw: unknown): TtsVoiceEntry[] {
-  if (!Array.isArray(raw)) return []
-  return raw
-    .filter((e): e is { provider: string; voice: string } =>
-      e && typeof e === 'object' && typeof e.provider === 'string' && typeof e.voice === 'string',
-    )
-    .map((e) => ({
-      provider: e.provider as TtsVoiceEntry['provider'],
-      voice: e.voice,
-    }))
-}
-
 /** Resolve gateway WebSocket URL from env/defaults (same logic as OpenClaw's callGateway) */
 function resolveGatewayUrl(port?: number): string {
   if (port) return `ws://127.0.0.1:${port}`
@@ -74,7 +62,6 @@ function resolveGatewayFromHost(api: PluginApi): { token?: string; port?: number
 
 function parsePluginConfig(raw: Record<string, unknown> | undefined): CrawdConfig {
   const cfg = raw ?? {}
-  const tts = (cfg.tts ?? {}) as Record<string, unknown>
   const vibe = (cfg.vibe ?? {}) as Record<string, unknown>
   const chat = (cfg.chat ?? {}) as Record<string, unknown>
   const youtube = (chat.youtube ?? {}) as Record<string, unknown>
@@ -86,14 +73,6 @@ function parsePluginConfig(raw: Record<string, unknown> | undefined): CrawdConfi
     enabled: cfg.enabled !== false,
     port,
     bindHost: typeof cfg.bindHost === 'string' ? cfg.bindHost : '0.0.0.0',
-    backendUrl: typeof cfg.backendUrl === 'string' ? cfg.backendUrl : `http://localhost:${port}`,
-    tts: {
-      chat: parseTtsChain(tts.chat),
-      bot: parseTtsChain(tts.bot),
-      openaiApiKey: typeof tts.openaiApiKey === 'string' ? tts.openaiApiKey : undefined,
-      elevenlabsApiKey: typeof tts.elevenlabsApiKey === 'string' ? tts.elevenlabsApiKey : undefined,
-      tiktokSessionId: typeof tts.tiktokSessionId === 'string' ? tts.tiktokSessionId : undefined,
-    },
     vibe: {
       enabled: vibe.enabled !== false,
       intervalMs: typeof vibe.intervalMs === 'number' ? vibe.intervalMs : 10_000,
@@ -136,12 +115,6 @@ const crawdConfigSchema = {
     enabled: { label: 'Enabled' },
     port: { label: 'Backend Port', placeholder: '4000' },
     bindHost: { label: 'Bind Host', placeholder: '0.0.0.0', advanced: true },
-    backendUrl: { label: 'Backend URL', advanced: true, help: 'Public URL for TTS file serving' },
-    'tts.chat': { label: 'Chat TTS Voices', help: 'Ordered fallback chain [{provider, voice}]' },
-    'tts.bot': { label: 'Bot TTS Voices', help: 'Ordered fallback chain [{provider, voice}]' },
-    'tts.openaiApiKey': { label: 'OpenAI API Key', sensitive: true },
-    'tts.elevenlabsApiKey': { label: 'ElevenLabs API Key', sensitive: true },
-    'tts.tiktokSessionId': { label: 'TikTok Session ID', sensitive: true },
     'vibe.enabled': { label: 'Vibe Mode' },
     'vibe.intervalMs': { label: 'Vibe Interval (ms)', advanced: true },
     'vibe.idleAfterMs': { label: 'Idle After (ms)', advanced: true },
@@ -153,15 +126,15 @@ const crawdConfigSchema = {
     'chat.pumpfun.enabled': { label: 'PumpFun Chat' },
     'chat.pumpfun.tokenMint': { label: 'PumpFun Token Mint' },
     'chat.pumpfun.authToken': { label: 'PumpFun Auth Token', sensitive: true },
-    gatewayUrl: { label: 'Gateway URL', advanced: true, help: 'Override auto-detected gateway URL (usually not needed)' },
-    gatewayToken: { label: 'Gateway Token', advanced: true, sensitive: true, help: 'Override OPENCLAW_GATEWAY_TOKEN env var' },
+    gatewayUrl: { label: 'Gateway URL', help: 'WebSocket URL for agent triggering', advanced: true },
+    gatewayToken: { label: 'Gateway Token', sensitive: true },
   },
 }
 
 const plugin: PluginDefinition = {
   id: 'crawd',
   name: 'Crawd Livestream',
-  description: 'crawd.bot plugin — AI agent livestreaming with TTS, chat integration, and OBS overlay',
+  description: 'crawd.bot plugin — AI agent livestreaming with chat integration and OBS overlay',
   configSchema: crawdConfigSchema,
 
   register(api: PluginApi) {
@@ -209,7 +182,7 @@ const plugin: PluginDefinition = {
         name: 'livestream_talk',
         label: 'Livestream Talk',
         description:
-          'Speak on the livestream unprompted. Shows a speech bubble on the overlay and generates TTS audio. Use for narration, vibes, and commentary — NOT for replying to chat (use livestream_reply for that).',
+          'Speak on the livestream unprompted. Shows a speech bubble on the overlay. Use for narration, vibes, and commentary — NOT for replying to chat (use livestream_reply for that).',
         parameters: Type.Object({
           text: Type.String({ description: 'Message to speak on stream' }),
         }),
@@ -232,7 +205,7 @@ const plugin: PluginDefinition = {
         name: 'livestream_reply',
         label: 'Livestream Reply',
         description:
-          'Reply to a chat message on the livestream. Reads the original message aloud with the chat voice, then speaks your reply with the bot voice. Use this ONLY when responding to a specific viewer message.',
+          'Reply to a chat message on the livestream. Shows the original message and your reply on the overlay. Use this ONLY when responding to a specific viewer message.',
         parameters: Type.Object({
           text: Type.String({ description: 'Your reply to the chat message' }),
           username: Type.String({ description: 'Username of the person you are replying to' }),
