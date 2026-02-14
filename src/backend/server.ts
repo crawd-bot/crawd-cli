@@ -14,7 +14,7 @@ import { pumpfun } from '../lib/pumpfun/v2/index.js'
 import { ChatManager } from '../lib/chat/manager.js'
 import { PumpFunChatClient } from '../lib/chat/pumpfun/client.js'
 import { YouTubeChatClient } from '../lib/chat/youtube/client.js'
-import { Coordinator, OneShotGateway, type CoordinatorConfig, type CoordinatorEvent } from './coordinator.js'
+import { Coordinator, OneShotGateway, type CoordinatorConfig, type CoordinatorEvent, type Plan, type AutonomyMode } from './coordinator.js'
 import { generateShortId } from '../lib/chat/types.js'
 import type { ChatMessage } from '../lib/chat/types.js'
 
@@ -26,6 +26,7 @@ export type CrawdConfig = {
   enabled: boolean
   port: number
   bindHost: string
+  autonomyMode?: AutonomyMode
   vibe: {
     enabled: boolean
     intervalMs: number
@@ -169,6 +170,34 @@ export class CrawdBackend {
     return { spoken: true }
   }
 
+  // =========================================================================
+  // Plan API (used by plugin tool handlers)
+  // =========================================================================
+
+  setPlan(goal: string, steps: string[]): { plan: Plan } | { error: string } {
+    if (!this.coordinator) return { error: 'Coordinator not enabled' }
+    const plan = this.coordinator.setPlan(goal, steps)
+    return { plan }
+  }
+
+  markPlanStepDone(step: number): { plan: Plan } | { error: string } {
+    if (!this.coordinator) return { error: 'Coordinator not enabled' }
+    const plan = this.coordinator.markStepDone(step)
+    if (!plan) return { error: 'No active plan or invalid step index' }
+    return { plan }
+  }
+
+  abandonPlan(): { plan: Plan } | { error: string } {
+    if (!this.coordinator) return { error: 'Coordinator not enabled' }
+    const plan = this.coordinator.abandonPlan()
+    if (!plan) return { error: 'No active plan to abandon' }
+    return { plan }
+  }
+
+  getPlan(): { plan: Plan | null } {
+    return { plan: this.coordinator?.getPlan() ?? null }
+  }
+
   getIO(): Server {
     return this.io
   }
@@ -228,7 +257,7 @@ export class CrawdBackend {
       )
 
       const coordConfig: Partial<CoordinatorConfig> = {
-        vibeEnabled: this.config.vibe.enabled,
+        autonomyMode: this.config.autonomyMode ?? 'vibe',
         vibeIntervalMs: this.config.vibe.intervalMs,
         idleAfterMs: this.config.vibe.idleAfterMs,
         sleepAfterIdleMs: this.config.vibe.sleepAfterIdleMs,
@@ -250,6 +279,14 @@ export class CrawdBackend {
           this.io.emit('crawd:status', { status: 'vibing' })
         } else if (event.type === 'chatProcessed') {
           this.io.emit('crawd:status', { status: 'chatting' })
+        } else if (event.type === 'planNudgeExecuted' && !event.skipped) {
+          this.io.emit('crawd:status', { status: 'planning' })
+        } else if (event.type === 'planCreated') {
+          this.io.emit('crawd:plan', { type: 'created', planId: event.planId, goal: event.goal })
+        } else if (event.type === 'planCompleted') {
+          this.io.emit('crawd:plan', { type: 'completed', planId: event.planId })
+        } else if (event.type === 'planAbandoned') {
+          this.io.emit('crawd:plan', { type: 'abandoned', planId: event.planId })
         }
       })
 
@@ -342,6 +379,10 @@ export class CrawdBackend {
       return { enabled: true, ...this.coordinator.getState() }
     })
 
+    this.fastify.get('/plan', async () => {
+      return this.getPlan()
+    })
+
     this.fastify.post<{ Body: Partial<CoordinatorConfig> }>(
       '/coordinator/config',
       async (request, reply) => {
@@ -421,11 +462,14 @@ export class CrawdBackend {
 
 export function configFromEnv(): CrawdConfig {
   const port = Number(process.env.PORT || 4000)
+  const rawMode = process.env.AUTONOMY_MODE
+  const autonomyMode = (rawMode === 'vibe' || rawMode === 'plan' || rawMode === 'none') ? rawMode : undefined
 
   return {
     enabled: true,
     port,
     bindHost: process.env.BIND_HOST || '0.0.0.0',
+    autonomyMode,
     vibe: {
       enabled: process.env.VIBE_ENABLED !== 'false',
       intervalMs: Number(process.env.VIBE_INTERVAL_MS || 30_000),

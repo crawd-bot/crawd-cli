@@ -4,29 +4,54 @@ import type { ChatMessage } from '../lib/chat/types'
 
 const SESSION_KEY = process.env.CRAWD_CHANNEL_ID || 'agent:main:crawd:live'
 
-/** Coordinator configuration */
+// ---------------------------------------------------------------------------
+// Plan types
+// ---------------------------------------------------------------------------
+
+export type PlanStep = {
+  description: string
+  status: 'pending' | 'done'
+}
+
+export type Plan = {
+  id: string
+  goal: string
+  steps: PlanStep[]
+  createdAt: number
+  status: 'active' | 'completed' | 'abandoned'
+}
+
+export type AutonomyMode = 'vibe' | 'plan' | 'none'
+
+// ---------------------------------------------------------------------------
+// Coordinator configuration
+// ---------------------------------------------------------------------------
+
 export type CoordinatorConfig = {
-  /** Whether autonomous vibing is enabled. Default: true */
-  vibeEnabled: boolean
-  /** How often to send vibe prompt when active (ms). Default: 60000 (1 min) */
+  /** Autonomy mode: 'vibe' (periodic prompts), 'plan' (goal-driven loop), 'none' (disabled). */
+  autonomyMode: AutonomyMode
+  /** How often to send vibe prompt when active (ms). Default: 30000 (30 sec). Only used in vibe mode. */
   vibeIntervalMs: number
-  /** Go idle after this much inactivity while active (ms). Default: 30000 (30 sec) */
+  /** Go idle after this much inactivity while active (ms). Default: 180000 (3 min) */
   idleAfterMs: number
-  /** Go sleep after this much inactivity while idle (ms). Default: 60000 (1 min) */
+  /** Go sleep after this much inactivity while idle (ms). Default: 180000 (3 min) */
   sleepAfterIdleMs: number
   /** Chat batch throttle window (ms). Default: 20000 (20 sec) */
   batchWindowMs: number
-  /** The autonomous "vibe" prompt sent periodically */
+  /** The autonomous "vibe" prompt sent periodically. Only used in vibe mode. */
   vibePrompt: string
+  /** Delay between plan nudges (ms). Default: 2000 (2 sec). Only used in plan mode. */
+  planNudgeDelayMs: number
 }
 
 export const DEFAULT_CONFIG: CoordinatorConfig = {
-  vibeEnabled: true,
+  autonomyMode: 'vibe',
   vibeIntervalMs: 30_000,
   idleAfterMs: 180_000,
   sleepAfterIdleMs: 180_000,
   batchWindowMs: 20_000,
   vibePrompt: `[CRAWD:VIBE] You are on a livestream. Make sure the crawd skill is loaded. Do one thing on the internet or ask the chat something. Respond with LIVESTREAM_REPLIED after using a tool, or NO_REPLY if you have nothing to say.`,
+  planNudgeDelayMs: 2_000,
 }
 
 export type CoordinatorState = 'sleep' | 'idle' | 'active'
@@ -504,6 +529,13 @@ export type CoordinatorEvent =
   | { type: 'vibeExecuted'; skipped: boolean; reason?: string }
   | { type: 'sleepCheck'; inactiveForMs: number; willSleep: boolean }
   | { type: 'chatProcessed'; count: number }
+  // Plan events
+  | { type: 'planCreated'; planId: string; goal: string; stepCount: number }
+  | { type: 'planStepDone'; planId: string; step: number }
+  | { type: 'planCompleted'; planId: string }
+  | { type: 'planAbandoned'; planId: string }
+  | { type: 'planNudgeScheduled'; nextNudgeAt: number }
+  | { type: 'planNudgeExecuted'; skipped: boolean; reason?: string }
 
 export class Coordinator {
   private buffer: ChatMessage[] = []
@@ -520,10 +552,14 @@ export class Coordinator {
   private idleSince = 0
   private vibeTimer: NodeJS.Timeout | null = null
   private sleepCheckTimer: NodeJS.Timeout | null = null
-  /** True while a flush or talk is being processed — vibes should wait */
+  /** True while a flush or talk is being processed — vibes/nudges should wait */
   private _busy = false
   /** Serializes all triggerAgent calls to prevent concurrent runs */
   private _gatewayQueue: Promise<void> = Promise.resolve()
+
+  // === Plan State ===
+  private currentPlan: Plan | null = null
+  private planNudgeTimer: NodeJS.Timeout | null = null
 
   // === Injected dependencies ===
   private readonly clock: IClock
@@ -555,6 +591,7 @@ export class Coordinator {
   updateConfig(config: Partial<CoordinatorConfig>): void {
     this.config = { ...this.config, ...config }
     this.logger.log('[Coordinator] Config updated:', {
+      autonomyMode: this.config.autonomyMode,
       vibeIntervalMs: this.config.vibeIntervalMs,
       idleAfterMs: this.config.idleAfterMs,
       sleepAfterIdleMs: this.config.sleepAfterIdleMs,
@@ -563,11 +600,13 @@ export class Coordinator {
   }
 
   /** Get current state and config */
-  getState(): { state: CoordinatorState; lastActivityAt: number; config: CoordinatorConfig } {
+  getState(): { state: CoordinatorState; lastActivityAt: number; config: CoordinatorConfig; plan: Plan | null; autonomyMode: AutonomyMode } {
     return {
       state: this._state,
       lastActivityAt: this.lastActivityAt,
       config: this.config,
+      plan: this.currentPlan,
+      autonomyMode: this.config.autonomyMode,
     }
   }
 
@@ -597,6 +636,7 @@ export class Coordinator {
 
   stop(): void {
     this.stopVibeLoop()
+    this.cancelPlanNudge()
     if (this.timer) {
       this.clock.clearTimeout(this.timer)
       this.timer = null
@@ -607,7 +647,7 @@ export class Coordinator {
 
   // === State Machine Methods ===
 
-  /** Wake up from sleep/idle state and start the vibe loop */
+  /** Wake up from sleep/idle state and start the autonomy loop */
   wake(): void {
     if (this._state === 'active') return
 
@@ -617,7 +657,12 @@ export class Coordinator {
     this.logger.log('[Coordinator] WAKE - transitioning to ACTIVE state')
     this.emit({ type: 'stateChange', from, to: 'active' })
 
-    this.startVibeLoop()
+    this.startVibeLoop() // starts sleep/idle check timers + vibe loop (if mode=vibe)
+
+    // In plan mode, also start plan nudges if there are pending steps
+    if (this.config.autonomyMode === 'plan' && this.hasPendingPlanSteps()) {
+      this.schedulePlanNudge()
+    }
   }
 
   /** Go to idle state (between activities, eyes open) */
@@ -644,6 +689,7 @@ export class Coordinator {
     this.emit({ type: 'stateChange', from, to: 'sleep' })
 
     this.stopVibeLoop()
+    this.cancelPlanNudge()
     this.compactSession()
   }
 
@@ -673,6 +719,202 @@ export class Coordinator {
   /** Get time since last activity */
   getInactiveTime(): number {
     return this.clock.now() - this.lastActivityAt
+  }
+
+  // === Plan Methods ===
+
+  /** Create or replace the current plan */
+  setPlan(goal: string, steps: string[]): Plan {
+    if (this.currentPlan?.status === 'active') {
+      this.currentPlan.status = 'abandoned'
+      this.emit({ type: 'planAbandoned', planId: this.currentPlan.id })
+    }
+
+    const plan: Plan = {
+      id: randomUUID(),
+      goal,
+      steps: steps.map(s => ({ description: s, status: 'pending' as const })),
+      createdAt: this.clock.now(),
+      status: 'active',
+    }
+    this.currentPlan = plan
+    this.emit({ type: 'planCreated', planId: plan.id, goal, stepCount: steps.length })
+
+    if (this._state !== 'active') this.wake()
+
+    return plan
+  }
+
+  /** Mark a step as done (0-indexed). Returns updated plan or null. */
+  markStepDone(stepIndex: number): Plan | null {
+    if (!this.currentPlan || this.currentPlan.status !== 'active') return null
+    if (stepIndex < 0 || stepIndex >= this.currentPlan.steps.length) return null
+
+    this.currentPlan.steps[stepIndex].status = 'done'
+    this.emit({ type: 'planStepDone', planId: this.currentPlan.id, step: stepIndex })
+
+    const allDone = this.currentPlan.steps.every(s => s.status === 'done')
+    if (allDone) {
+      this.currentPlan.status = 'completed'
+      this.emit({ type: 'planCompleted', planId: this.currentPlan.id })
+    }
+
+    return this.currentPlan
+  }
+
+  /** Abandon the current plan */
+  abandonPlan(): Plan | null {
+    if (!this.currentPlan || this.currentPlan.status !== 'active') return null
+    this.currentPlan.status = 'abandoned'
+    this.emit({ type: 'planAbandoned', planId: this.currentPlan.id })
+    this.cancelPlanNudge()
+    return this.currentPlan
+  }
+
+  /** Get the current plan */
+  getPlan(): Plan | null {
+    return this.currentPlan
+  }
+
+  /** Check if there is an active plan with pending steps */
+  private hasPendingPlanSteps(): boolean {
+    if (!this.currentPlan || this.currentPlan.status !== 'active') return false
+    return this.currentPlan.steps.some(s => s.status === 'pending')
+  }
+
+  // === Plan Nudge Loop ===
+
+  /** Schedule next plan nudge (short delay to avoid spinning) */
+  private schedulePlanNudge(): void {
+    this.cancelPlanNudge()
+    if (this._state === 'sleep') return
+    if (this.config.autonomyMode !== 'plan') return
+    if (!this.hasPendingPlanSteps()) return
+
+    const delay = this.config.planNudgeDelayMs
+    const nextNudgeAt = this.clock.now() + delay
+    this.emit({ type: 'planNudgeScheduled', nextNudgeAt })
+    this.planNudgeTimer = this.clock.setTimeout(() => this.planNudge(), delay)
+  }
+
+  /** Cancel pending plan nudge */
+  private cancelPlanNudge(): void {
+    if (this.planNudgeTimer) {
+      this.clock.clearTimeout(this.planNudgeTimer)
+      this.planNudgeTimer = null
+    }
+  }
+
+  /** Check plan state and schedule next nudge if needed */
+  private checkPlanProgress(): void {
+    if (this.config.autonomyMode !== 'plan') return
+    if (this._state === 'sleep') return
+    if (this.hasPendingPlanSteps()) {
+      this.schedulePlanNudge()
+    }
+  }
+
+  /** Execute a plan nudge — send [CRAWD:PLAN] prompt to agent */
+  private async planNudge(): Promise<void> {
+    if (this._state === 'sleep') {
+      this.emit({ type: 'planNudgeExecuted', skipped: true, reason: 'sleeping' })
+      return
+    }
+
+    if (this._busy) {
+      this.logger.log('[Coordinator] Plan nudge skipped - busy')
+      this.emit({ type: 'planNudgeExecuted', skipped: true, reason: 'busy' })
+      this.schedulePlanNudge()
+      return
+    }
+
+    if (!this.hasPendingPlanSteps()) {
+      this.logger.log('[Coordinator] Plan nudge skipped - no pending steps')
+      this.emit({ type: 'planNudgeExecuted', skipped: true, reason: 'no pending steps' })
+      return
+    }
+
+    if (this._state === 'idle') {
+      const from = this._state
+      this._state = 'active'
+      this.emit({ type: 'stateChange', from, to: 'active' })
+    }
+
+    this.logger.log('[Coordinator] Plan nudge - sending plan prompt')
+    this.emit({ type: 'planNudgeExecuted', skipped: false })
+    this.resetActivity()
+
+    const prompt = this.buildPlanNudgePrompt()
+
+    this._busy = true
+    let noReply = false
+    const nudgeOp = this._gatewayQueue.then(async () => {
+      this._busy = true
+      try {
+        const replies = await this.triggerFn(prompt)
+        const agentReplies = replies.filter(r => !this.isApiError(r))
+
+        // Treat empty replies as NO_REPLY — gateway returns empty payloads
+        // when the agent responds with text-only (no tool calls)
+        if (agentReplies.length === 0 || agentReplies.some(r => r.trim().toUpperCase() === 'NO_REPLY')) {
+          noReply = true
+        } else if (!this.isCompliantReply(agentReplies)) {
+          const misaligned = agentReplies.filter(r => {
+            const t = r.trim().toUpperCase()
+            return t !== 'NO_REPLY' && t !== 'LIVESTREAM_REPLIED'
+          })
+          if (misaligned.length > 0) {
+            await this.sendMisalignment(misaligned)
+          }
+        }
+      } catch (err) {
+        this.logger.error('[Coordinator] Plan nudge failed:', err)
+      } finally {
+        this._busy = false
+      }
+    })
+    this._gatewayQueue = nudgeOp.catch(() => {})
+
+    try {
+      await nudgeOp
+    } catch {}
+
+    if (noReply) {
+      this.logger.log('[Coordinator] Agent sent NO_REPLY during plan nudge, going to sleep')
+      this.goSleep()
+      return
+    }
+
+    this.checkPlanProgress()
+  }
+
+  /** Build the [CRAWD:PLAN] prompt with current plan progress */
+  private buildPlanNudgePrompt(): string {
+    if (!this.currentPlan || this.currentPlan.status !== 'active') {
+      return '[CRAWD:PLAN] No active plan. Create one using plan_set or respond with NO_REPLY to idle.'
+    }
+
+    const lines: string[] = ['[CRAWD:PLAN] Continue your plan.', '']
+    lines.push(`Target: ${this.currentPlan.goal}`)
+
+    let nextStepIdx = -1
+    for (let i = 0; i < this.currentPlan.steps.length; i++) {
+      const step = this.currentPlan.steps[i]
+      const isDone = step.status === 'done'
+      if (!isDone && nextStepIdx === -1) nextStepIdx = i
+      const marker = isDone ? '[x]' : (nextStepIdx === i ? '[-]' : '[ ]')
+      const arrow = nextStepIdx === i ? '  <-- next' : ''
+      lines.push(`${marker} ${i}. ${step.description}${arrow}`)
+    }
+
+    lines.push('')
+    if (nextStepIdx >= 0) {
+      lines.push(`Work on step ${nextStepIdx}. Use plan_step_done when complete.`)
+    }
+    lines.push('You can use plan_abandon to drop this plan, or plan_set to replace it.')
+    lines.push('Respond with LIVESTREAM_REPLIED after speaking, or NO_REPLY if you have nothing to say.')
+
+    return lines.join('\n')
   }
 
   /** Start the periodic vibe loop */
@@ -723,9 +965,9 @@ export class Coordinator {
 
   /** Schedule the next vibe action */
   scheduleNextVibe(): void {
-    // Vibe while active or idle (not while sleeping)
     if (this._state === 'sleep') return
-    if (!this.config.vibeEnabled) return
+    // Only schedule vibes in vibe mode
+    if (this.config.autonomyMode !== 'vibe') return
 
     const nextVibeAt = this.clock.now() + this.config.vibeIntervalMs
     this.emit({ type: 'vibeScheduled', nextVibeAt })
@@ -771,7 +1013,9 @@ export class Coordinator {
         const replies = await this.triggerFn(this.config.vibePrompt)
         // Filter out API errors (429s, rate limits) — not agent responses
         const agentReplies = replies.filter(r => !this.isApiError(r))
-        if (agentReplies.some(r => r.trim().toUpperCase() === 'NO_REPLY')) {
+        // Treat empty replies as NO_REPLY — gateway returns empty payloads
+        // when the agent responds with text-only (no tool calls)
+        if (agentReplies.length === 0 || agentReplies.some(r => r.trim().toUpperCase() === 'NO_REPLY')) {
           noReply = true
         } else if (!this.isCompliantReply(agentReplies)) {
           misaligned = agentReplies.filter(r => {
@@ -919,6 +1163,7 @@ export class Coordinator {
         this.logger.error('[Coordinator] Failed to trigger agent:', err)
       } finally {
         this._busy = false
+        this.checkPlanProgress()
       }
     }).catch(() => {})
   }
@@ -938,6 +1183,12 @@ export class Coordinator {
       ? '\n(To reply to a specific message, prefix with its ID: [msgId] your reply)'
       : ''
 
-    return `${header}\n${lines.join('\n')}${instruction}`
+    // In plan mode with no active plan, instruct agent to create one
+    let planInstruction = ''
+    if (this.config.autonomyMode === 'plan' && !this.hasPendingPlanSteps()) {
+      planInstruction = '\n\nYou are in plan mode. Create a plan using plan_set based on these messages or your own ideas, then start working on it.'
+    }
+
+    return `${header}\n${lines.join('\n')}${instruction}${planInstruction}`
   }
 }

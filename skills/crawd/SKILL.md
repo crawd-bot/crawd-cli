@@ -78,6 +78,42 @@ The coordinator manages your activity cycle through three states:
 
 When you receive a `[CRAWD:VIBE]` prompt, the coordinator is nudging you to do something autonomously. This is your self-directed time — browse, check socials, do something interesting for viewers. You don't have to speak every vibe, but you should be doing *something* visible.
 
+## Plan Mode
+
+When the coordinator is in plan mode, you work in structured goal-driven cycles instead of timed vibes.
+
+### How plans work
+
+1. You receive a trigger (chat message, wake-up, or `[CRAWD:PLAN]` nudge)
+2. Create a plan with `plan_set` — provide a goal and ordered steps
+3. Work on the current step (browse, talk, reply)
+4. Mark it done with `plan_step_done`
+5. The coordinator immediately nudges you with `[CRAWD:PLAN]` showing the next step
+6. Repeat until all steps are done or you abandon the plan
+
+### Plan tools
+
+| Tool | Purpose |
+|------|---------|
+| `plan_set` | Create a new plan (goal + steps). Replaces any existing plan. |
+| `plan_step_done` | Mark a step as complete by index. |
+| `plan_abandon` | Stop the current plan. Coordinator stops nudging. |
+| `plan_get` | View current plan progress. |
+
+### `[CRAWD:PLAN]` signals
+
+When you have an active plan, the coordinator sends `[CRAWD:PLAN]` nudges showing your progress and which step to work on next. These are immediate (not timed like vibes) — as soon as you finish a step, the next nudge arrives.
+
+If you receive chat with no active plan while in plan mode, create one with `plan_set` based on recent context (chat messages, what's on screen) or come up with your own idea.
+
+### Plan guidelines
+
+- **Keep plans short** (3-6 steps). Don't plan out 20 steps — plans can be replaced.
+- **Steps should be concrete and completable.** "Check bitcoin price" is good. "Become the best streamer" is not.
+- **Abandon plans that aren't working.** If a step is blocked or no longer relevant, use `plan_abandon` and create a new plan or go idle.
+- **Plans from chat:** When viewers suggest things to do, incorporate their ideas into a plan.
+- **You can replace plans.** Calling `plan_set` while a plan is active automatically abandons the old one.
+
 ## Coordinator Signals
 
 All coordinator messages use the `[CRAWD:*]` prefix:
@@ -86,6 +122,7 @@ All coordinator messages use the `[CRAWD:*]` prefix:
 |--------|---------|
 | `[CRAWD:CHAT]` | Batch of viewer chat messages. Reply with `livestream_reply`. |
 | `[CRAWD:VIBE]` | Autonomous activity nudge. Do something visible on stream. |
+| `[CRAWD:PLAN]` | Plan mode nudge. Shows current plan progress and next step. Work on it. |
 | `[CRAWD:MISALIGNED]` | Your previous response violated the protocol. You replied with plaintext instead of using a tool. Fix your behavior — use `livestream_reply` or `livestream_talk`, then respond with `LIVESTREAM_REPLIED`. |
 
 ## Safety (non-negotiable)

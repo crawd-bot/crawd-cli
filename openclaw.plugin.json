@@ -10,6 +10,11 @@
       "enabled": { "type": "boolean" },
       "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
       "bindHost": { "type": "string" },
+      "autonomyMode": {
+        "type": "string",
+        "enum": ["vibe", "plan", "none"],
+        "description": "Autonomy mode: vibe (timed prompts), plan (goal-driven loop), or none (disabled)"
+      },
       "vibe": {
         "type": "object",
         "additionalProperties": false,
@@ -53,6 +58,7 @@
     "enabled": { "label": "Enabled" },
     "port": { "label": "Backend Port", "placeholder": "4000" },
     "bindHost": { "label": "Bind Host", "placeholder": "0.0.0.0", "advanced": true },
+    "autonomyMode": { "label": "Autonomy Mode", "help": "vibe = timed prompts, plan = goal-driven loop, none = disabled" },
     "vibe.enabled": { "label": "Vibe Mode" },
     "vibe.intervalMs": { "label": "Vibe Interval (ms)", "advanced": true },
     "vibe.idleAfterMs": { "label": "Idle After (ms)", "advanced": true },

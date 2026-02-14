@@ -92,6 +92,10 @@ function parsePluginConfig(raw: Record<string, unknown> | undefined): CrawdConfi
         authToken: typeof pumpfun.authToken === 'string' ? pumpfun.authToken : undefined,
       },
     },
+    // Autonomy mode: vibe (periodic prompts), plan (goal-driven), none (disabled)
+    autonomyMode: cfg.autonomyMode === 'vibe' || cfg.autonomyMode === 'plan' || cfg.autonomyMode === 'none'
+      ? cfg.autonomyMode
+      : undefined,
     // Gateway: plugin config overrides, then env vars, then OpenClaw defaults
     gatewayUrl: typeof cfg.gatewayUrl === 'string' ? cfg.gatewayUrl
       : process.env.OPENCLAW_GATEWAY_URL ?? resolveGatewayUrl(),
@@ -115,6 +119,7 @@ const crawdConfigSchema = {
     enabled: { label: 'Enabled' },
     port: { label: 'Backend Port', placeholder: '4000' },
     bindHost: { label: 'Bind Host', placeholder: '0.0.0.0', advanced: true },
+    'autonomyMode': { label: 'Autonomy Mode', help: 'vibe = timed prompts, plan = goal-driven loop, none = disabled' },
     'vibe.enabled': { label: 'Vibe Mode' },
     'vibe.intervalMs': { label: 'Vibe Interval (ms)', advanced: true },
     'vibe.idleAfterMs': { label: 'Idle After (ms)', advanced: true },
@@ -222,6 +227,117 @@ const plugin: PluginDefinition = {
         },
       },
       { name: 'livestream_reply' },
+    )
+
+    // plan_set — create or replace current plan
+    api.registerTool(
+      {
+        name: 'plan_set',
+        label: 'Set Plan',
+        description:
+          'Create or replace the current plan. Provide a goal and ordered steps. Any existing active plan is abandoned.',
+        parameters: Type.Object({
+          goal: Type.String({ description: 'The overall goal of the plan' }),
+          steps: Type.Array(Type.String(), { description: 'Ordered list of steps to accomplish the goal', minItems: 1, maxItems: 20 }),
+        }),
+        async execute(_toolCallId: string, params: unknown) {
+          const b = await ensureBackend()
+          const { goal, steps } = params as { goal: string; steps: string[] }
+          const result = b.setPlan(goal, steps)
+          if ('error' in result) {
+            return { content: [{ type: 'text', text: `Failed: ${result.error}` }] }
+          }
+          const stepList = result.plan.steps.map((s, i) => `  ${i}. ${s.description}`).join('\n')
+          return {
+            content: [{ type: 'text', text: `Plan created: ${goal}\n${stepList}` }],
+            details: result,
+          }
+        },
+      },
+      { name: 'plan_set' },
+    )
+
+    // plan_step_done — mark a step as complete
+    api.registerTool(
+      {
+        name: 'plan_step_done',
+        label: 'Plan Step Done',
+        description:
+          'Mark a plan step as done by its 0-based index. The coordinator will nudge you for the next step.',
+        parameters: Type.Object({
+          step: Type.Number({ description: 'Zero-based index of the step to mark as done' }),
+        }),
+        async execute(_toolCallId: string, params: unknown) {
+          const b = await ensureBackend()
+          const { step } = params as { step: number }
+          const result = b.markPlanStepDone(step)
+          if ('error' in result) {
+            return { content: [{ type: 'text', text: `Failed: ${result.error}` }] }
+          }
+          const done = result.plan.steps.filter(s => s.status === 'done').length
+          const total = result.plan.steps.length
+          const isComplete = result.plan.status === 'completed'
+          return {
+            content: [{ type: 'text', text: isComplete
+              ? `Plan completed! All ${total} steps done.`
+              : `Step ${step} done (${done}/${total} complete).`
+            }],
+            details: result,
+          }
+        },
+      },
+      { name: 'plan_step_done' },
+    )
+
+    // plan_abandon — abandon current plan
+    api.registerTool(
+      {
+        name: 'plan_abandon',
+        label: 'Abandon Plan',
+        description:
+          'Abandon the current plan. The coordinator will stop sending plan nudges.',
+        parameters: Type.Object({}),
+        async execute(_toolCallId: string, _params: unknown) {
+          const b = await ensureBackend()
+          const result = b.abandonPlan()
+          if ('error' in result) {
+            return { content: [{ type: 'text', text: `Failed: ${result.error}` }] }
+          }
+          return {
+            content: [{ type: 'text', text: `Plan abandoned: ${result.plan.goal}` }],
+            details: result,
+          }
+        },
+      },
+      { name: 'plan_abandon' },
+    )
+
+    // plan_get — view current plan state
+    api.registerTool(
+      {
+        name: 'plan_get',
+        label: 'Get Plan',
+        description:
+          'View the current plan state including goal, steps, and progress.',
+        parameters: Type.Object({}),
+        async execute(_toolCallId: string, _params: unknown) {
+          const b = await ensureBackend()
+          const result = b.getPlan()
+          if (!result.plan) {
+            return { content: [{ type: 'text', text: 'No active plan.' }] }
+          }
+          const p = result.plan
+          const stepList = p.steps.map((s, i) => {
+            const marker = s.status === 'done' ? '[x]' : '[ ]'
+            return `  ${marker} ${i}. ${s.description}`
+          }).join('\n')
+          return {
+            content: [{ type: 'text', text: `Plan (${p.status}): ${p.goal}\n${stepList}` }],
+            details: result,
+          }
+        },
+      },
+      { name: 'plan_get' },
     )
 
     // Service lifecycle

@@ -18,8 +18,11 @@ import { ENV_PATH, CONFIG_PATH } from "../utils/paths.js";
 function parseCoordinatorConfig(): Partial<CoordinatorConfig> {
   const config: Partial<CoordinatorConfig> = {};
 
-  if (process.env.VIBE_ENABLED !== undefined) {
-    config.vibeEnabled = process.env.VIBE_ENABLED === 'true';
+  if (process.env.AUTONOMY_MODE) {
+    const mode = process.env.AUTONOMY_MODE
+    if (mode === 'vibe' || mode === 'plan' || mode === 'none') {
+      config.autonomyMode = mode
+    }
   }
   if (process.env.VIBE_INTERVAL_MS) {
     config.vibeIntervalMs = Number(process.env.VIBE_INTERVAL_MS);
