@@ -506,6 +506,102 @@ export class OneShotGateway {
       })
     })
   }
+
+  /** Compact a session via the gateway's sessions.compact method */
+  async compactSession(maxLines = 400): Promise<{ compacted: boolean }> {
+    return new Promise((resolve, reject) => {
+      const ws = new WebSocket(this.url)
+      const authId = randomUUID()
+      const reqId = randomUUID()
+      let settled = false
+
+      const timeout = setTimeout(() => {
+        if (!settled) {
+          settled = true
+          ws.close()
+          reject(new Error('One-shot compact request timed out (30s)'))
+        }
+      }, 30_000)
+
+      const finish = (result?: { compacted: boolean }, error?: Error) => {
+        if (settled) return
+        settled = true
+        clearTimeout(timeout)
+        ws.close()
+        if (error) {
+          console.error(`[OneShotGateway] compact error: ${error.message}`)
+          reject(error)
+        } else {
+          resolve(result ?? { compacted: false })
+        }
+      }
+
+      const sendConnect = () => {
+        ws.send(JSON.stringify({
+          type: 'req',
+          id: authId,
+          method: 'connect',
+          params: {
+            minProtocol: 3,
+            maxProtocol: 3,
+            client: {
+              id: 'gateway-client',
+              version: '1.0.0',
+              platform: 'node',
+              mode: 'backend',
+            },
+            auth: this.token ? { token: this.token } : {},
+          },
+        }))
+      }
+
+      ws.on('message', (data) => {
+        try {
+          const frame = JSON.parse(data.toString()) as GatewayFrame
+
+          if (frame.type === 'event' && (frame as any).event === 'connect.challenge') {
+            sendConnect()
+            return
+          }
+
+          if (frame.type === 'res' && frame.id === authId) {
+            if (frame.error) {
+              finish(undefined, new Error(`Gateway auth failed: ${frame.error.message}`))
+              return
+            }
+            ws.send(JSON.stringify({
+              type: 'req',
+              id: reqId,
+              method: 'sessions.compact',
+              params: {
+                key: this.sessionKey,
+                maxLines,
+              },
+            }))
+          } else if (frame.type === 'res' && frame.id === reqId) {
+            if (frame.error) {
+              finish(undefined, new Error(`sessions.compact failed: ${frame.error.message}`))
+              return
+            }
+            const payload = frame.payload as any
+            finish({ compacted: payload?.compacted === true })
+          }
+        } catch {
+          // Parse error — ignore
+        }
+      })
+
+      ws.on('error', (err) => {
+        finish(undefined, err instanceof Error ? err : new Error(String(err)))
+      })
+
+      ws.on('close', () => {
+        if (!settled) {
+          finish(undefined, new Error('WebSocket closed unexpectedly'))
+        }
+      })
+    })
+  }
 }
 
 /**
@@ -541,6 +637,7 @@ export class Coordinator {
   private buffer: ChatMessage[] = []
   private timer: NodeJS.Timeout | null = null
   private triggerFn: TriggerAgentFn
+  private compactFn?: () => Promise<void>
   private onEvent?: (event: CoordinatorEvent) => void
   /** Timestamp when coordinator was created (used to filter old messages on restart) */
   private readonly startedAt: number
@@ -620,6 +717,11 @@ export class Coordinator {
     this.onEvent = callback
   }
 
+  /** Set the compact function (uses gateway sessions.compact instead of sending /compact as agent message) */
+  setCompactFn(fn: () => Promise<void>): void {
+    this.compactFn = fn
+  }
+
   private emit(event: CoordinatorEvent): void {
     this.onEvent?.(event)
   }
@@ -695,9 +797,10 @@ export class Coordinator {
 
   /** Compact the agent's session context before sleeping to free stale history */
   private compactSession(): void {
+    if (!this.compactFn) return
     this._gatewayQueue = this._gatewayQueue.then(async () => {
       try {
-        await this.triggerFn('/compact')
+        await this.compactFn!()
         this.logger.log('[Coordinator] Session compacted before sleep')
       } catch (err) {
         this.logger.error('[Coordinator] Failed to compact session:', err)
@@ -912,6 +1015,7 @@ export class Coordinator {
       lines.push(`Work on step ${nextStepIdx}. Use plan_step_done when complete.`)
     }
     lines.push('You can use plan_abandon to drop this plan, or plan_set to replace it.')
+    lines.push('IMPORTANT: Never mention plans, steps, or progress on stream. Just do the thing naturally.')
     lines.push('Respond with LIVESTREAM_REPLIED after speaking, or NO_REPLY if you have nothing to say.')
 
     return lines.join('\n')
@@ -1186,7 +1290,7 @@ export class Coordinator {
     // In plan mode with no active plan, instruct agent to create one
     let planInstruction = ''
     if (this.config.autonomyMode === 'plan' && !this.hasPendingPlanSteps()) {
-      planInstruction = '\n\nYou are in plan mode. Create a plan using plan_set based on these messages or your own ideas, then start working on it.'
+      planInstruction = '\n\nYou are in plan mode. Create a plan using plan_set based on these messages or your own ideas, then start working on it. Never mention plans or steps on stream — just do things naturally.'
     }
 
     return `${header}\n${lines.join('\n')}${instruction}${planInstruction}`

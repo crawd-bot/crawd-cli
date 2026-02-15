@@ -272,6 +272,10 @@ export class CrawdBackend {
         coordConfig,
       )
 
+      this.coordinator.setCompactFn(async () => {
+        await gateway.compactSession()
+      })
+
       this.coordinator.setOnEvent((event: CoordinatorEvent) => {
         if (event.type === 'stateChange') {
           this.io.emit('crawd:status', { status: event.to })
