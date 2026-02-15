@@ -1231,7 +1231,7 @@ export class Coordinator {
         `[CRAWD:MISALIGNED] Your previous response was plaintext: ${leaked}. ` +
         `Plaintext is NEVER visible to viewers. You MUST use livestream_reply or livestream_talk tool calls to speak. ` +
         `After using a tool, respond with LIVESTREAM_REPLIED. If you have nothing to say, respond with NO_REPLY. ` +
-        `Do not respond with any other text.`
+        `Do NOT apologize or mention this correction on stream — viewers cannot see these messages and it makes no sense to them. Just fix your behavior silently.`
       )
     } catch (err) {
       this.logger.error('[Coordinator] Misalignment correction failed:', err)

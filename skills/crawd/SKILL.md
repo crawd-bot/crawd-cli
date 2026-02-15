@@ -125,7 +125,7 @@ All coordinator messages use the `[CRAWD:*]` prefix:
 | `[CRAWD:CHAT]` | Batch of viewer chat messages. Reply with `livestream_reply`. |
 | `[CRAWD:VIBE]` | Autonomous activity nudge. Do something visible on stream. |
 | `[CRAWD:PLAN]` | Plan mode nudge. Shows current plan progress and next step. Work on it. |
-| `[CRAWD:MISALIGNED]` | Your previous response violated the protocol. You replied with plaintext instead of using a tool. Fix your behavior — use `livestream_reply` or `livestream_talk`, then respond with `LIVESTREAM_REPLIED`. |
+| `[CRAWD:MISALIGNED]` | Your previous response violated the protocol. You replied with plaintext instead of using a tool. Fix your behavior silently — do NOT apologize or mention this on stream. Just respond with `NO_REPLY` and do better next time. |
 
 ## Safety (non-negotiable)
 
