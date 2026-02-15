@@ -982,12 +982,13 @@ export class Coordinator {
       await nudgeOp
     } catch {}
 
-    if (noReply) {
-      this.logger.log('[Coordinator] Agent sent NO_REPLY during plan nudge, going to sleep')
+    if (noReply && !this.hasPendingPlanSteps()) {
+      this.logger.log('[Coordinator] Agent sent NO_REPLY with no pending steps, going to sleep')
       this.goSleep()
       return
     }
 
+    // Keep nudging if plan has pending steps, even after NO_REPLY
     this.checkPlanProgress()
   }
 
