@@ -994,7 +994,7 @@ export class Coordinator {
   /** Build the [CRAWD:PLAN] prompt with current plan progress */
   private buildPlanNudgePrompt(): string {
     if (!this.currentPlan || this.currentPlan.status !== 'active') {
-      return '[CRAWD:PLAN] No active plan. Create one using plan_set or respond with NO_REPLY to idle.'
+      return '[CRAWD:PLAN] No active plan. Come up with something fun to do — check X, browse HN, find something weird on the internet, go down a rabbit hole. Create a plan using plan_set with concrete steps. Be creative, not reactive. Or respond with NO_REPLY to idle.'
     }
 
     const lines: string[] = ['[CRAWD:PLAN] Continue your plan.', '']
@@ -1290,7 +1290,7 @@ export class Coordinator {
     // In plan mode with no active plan, instruct agent to create one
     let planInstruction = ''
     if (this.config.autonomyMode === 'plan' && !this.hasPendingPlanSteps()) {
-      planInstruction = '\n\nYou are in plan mode. Create a plan using plan_set based on these messages or your own ideas, then start working on it. Never mention plans or steps on stream — just do things naturally.'
+      planInstruction = '\n\nCreate a plan using plan_set. Be creative and proactive — come up with something YOU want to do, not just "reply to chat". Browse the web, go down rabbit holes, check X/HN/YouTube, find weird stuff, have opinions. Each step should be a concrete action. Think aloud on stream about what you\'re doing. Never mention plans or steps to viewers.'
     }
 
     return `${header}\n${lines.join('\n')}${instruction}${planInstruction}`
