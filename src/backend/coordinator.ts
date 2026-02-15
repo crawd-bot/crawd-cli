@@ -225,6 +225,7 @@ export class GatewayClient implements IGatewayClient {
         platform: 'node',
         mode: 'backend',
       },
+      scopes: ['operator.write'],
       commands: ['talk'],
       auth: { token: this.token },
     }, true) as Promise<void>
@@ -446,6 +447,7 @@ export class OneShotGateway {
               platform: 'node',
               mode: 'backend',
             },
+            scopes: ['operator.write'],
             commands: ['talk'],
             auth: this.token ? { token: this.token } : {},
           },
