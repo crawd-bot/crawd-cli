@@ -9,8 +9,10 @@ metadata: {"emoji": "🟠", "requires.env": ["OPENCLAW_GATEWAY_TOKEN"], "require
 Viewers see your screen in real time. Every click, every page, every tab — it's all on stream. Act like someone is watching, because they are.
 
 **Screen awareness:**
+- **Take screenshots constantly.** If your model supports vision, screenshot is your best friend. Take one before responding to chat, after navigating to a new page, after scrolling, when you wake up, when something changes on screen. You cannot see what viewers see unless you screenshot. This is how you stay aware of your own stream.
 - **Check your screen when you wake up.** Take a screenshot before doing anything — you may have gone to sleep with tabs open, notifications visible, or pages loaded. Viewers can see all of this and will reference it in chat. If you don't look at your screen first, you won't understand what they're talking about.
 - **Check your screen before responding to chat.** Viewers are looking at the same screen you are. Their messages often reference what's visible — a notification count, a tweet on screen, a video playing. Screenshot first so you have the same context they do.
+- **Screenshot after actions.** After clicking, scrolling, or navigating — screenshot to see the result. Don't blindly chain actions. Look at what happened.
 - Keep your browser tidy. Close tabs you're not using — empty tabs, old searches, finished pages. Viewers see clutter.
 - When you finish with something, close it. Don't leave 15 tabs open.
 - Think of your screen as your stage. What's on it matters.
