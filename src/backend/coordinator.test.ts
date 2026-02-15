@@ -330,24 +330,24 @@ describe('Coordinator — Plan Mode', () => {
     })
   })
 
-  describe('chat batch in plan mode', () => {
-    it('appends plan instruction to chat batch when no active plan', () => {
+  describe('chat batch format', () => {
+    it('includes END OF CHAT delimiter', () => {
       const coord = createCoordinator()
-      // No plan set
 
-      const batch = coord.formatBatch([makeChatMessage('do something cool')])
-      expect(batch).toContain('plan mode')
-      expect(batch).toContain('plan_set')
+      const batch = coord.formatBatch([makeChatMessage('hello')])
+      expect(batch).toContain('[END OF CHAT]')
+      expect(batch).not.toContain('plan_set')
 
       coord.stop()
     })
 
-    it('does not append plan instruction when plan is active', () => {
+    it('does not include plan instruction in chat batch', () => {
       const coord = createCoordinator()
-      coord.setPlan('Active plan', ['Working on it'])
+      // No plan set, but chat batch should NOT include plan instruction
 
-      const batch = coord.formatBatch([makeChatMessage('hello')])
+      const batch = coord.formatBatch([makeChatMessage('do something cool')])
       expect(batch).not.toContain('plan mode')
+      expect(batch).not.toContain('plan_set')
 
       coord.stop()
     })
