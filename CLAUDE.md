@@ -79,7 +79,7 @@ Production runs on a Mac Mini at `m1@62.210.193.35`. Use `/deploy` to automate.
 
 **Config:** Plugin config (vibe settings, chat sources) lives in `~/.openclaw/openclaw.json` under `plugins.entries.crawd.config`. TTS config lives in the overlay's `.env.local` (not in the plugin config).
 
-**SSH note:** Remote PATH doesn't include homebrew by default. Always prefix: `export PATH=/opt/homebrew/bin:$PATH`
+**SSH note:** `openclaw` is installed globally via npm at `/usr/local/bin`. Use `openclaw gateway restart --port 18789` to restart. pnpm is at `/opt/homebrew/bin` so prefix with `export PATH=/opt/homebrew/bin:$PATH` when running pnpm commands.
 
 ## Runtime Config (Coordinator)
 
