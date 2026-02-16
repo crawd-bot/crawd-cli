@@ -221,7 +221,7 @@ const plugin: PluginDefinition = {
           const { text, username, message } = params as { text: string; username: string; message: string }
           const result = await b.handleReply(text, { username, message })
           return {
-            content: [{ type: 'text', text: result.spoken ? `Replied to @${username}: "${text}"` : 'Failed to reply' }],
+            content: [{ type: 'text', text: result.spoken ? `Replied to ${username}: "${text}"` : 'Failed to reply' }],
             details: result,
           }
         },

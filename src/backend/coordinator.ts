@@ -1,8 +1,86 @@
-import { randomUUID } from 'crypto'
+import { randomUUID, createPrivateKey, createPublicKey, sign } from 'crypto'
+import { readFileSync, existsSync } from 'fs'
+import { join } from 'path'
+import { homedir } from 'os'
 import WebSocket from 'ws'
 import type { ChatMessage } from '../lib/chat/types'
 
 const SESSION_KEY = process.env.CRAWD_CHANNEL_ID || 'agent:main:crawd:live'
+
+// ---------------------------------------------------------------------------
+// Device identity for gateway authentication
+// ---------------------------------------------------------------------------
+
+type DeviceIdentity = {
+  deviceId: string
+  publicKeyPem: string
+  privateKeyPem: string
+}
+
+/**
+ * Load device identity from ~/.openclaw/identity/device.json.
+ * Returns null if not found (gateway will fall back to token-only auth without scopes).
+ */
+function loadDeviceIdentity(): DeviceIdentity | null {
+  const identityPath = join(homedir(), '.openclaw', 'identity', 'device.json')
+  try {
+    if (!existsSync(identityPath)) return null
+    const raw = JSON.parse(readFileSync(identityPath, 'utf8'))
+    if (raw?.version === 1 && typeof raw.deviceId === 'string' &&
+        typeof raw.publicKeyPem === 'string' && typeof raw.privateKeyPem === 'string') {
+      return { deviceId: raw.deviceId, publicKeyPem: raw.publicKeyPem, privateKeyPem: raw.privateKeyPem }
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
+function base64UrlEncode(buf: Buffer): string {
+  return buf.toString('base64url')
+}
+
+/** Extract raw 32-byte Ed25519 public key from PEM and return as base64url */
+function publicKeyRawBase64Url(publicKeyPem: string): string {
+  const pubKey = createPublicKey(publicKeyPem)
+  const der = pubKey.export({ type: 'spki', format: 'der' })
+  // Ed25519 SPKI DER: 12-byte header + 32-byte raw key
+  return base64UrlEncode(der.subarray(der.length - 32))
+}
+
+/** Sign a device auth payload with Ed25519 private key */
+function signPayload(privateKeyPem: string, payload: string): string {
+  const key = createPrivateKey(privateKeyPem)
+  return base64UrlEncode(sign(null, Buffer.from(payload, 'utf8'), key))
+}
+
+/**
+ * Build the device auth fields for a gateway connect request.
+ * Returns the `device` object to include in connect params, or undefined if no identity.
+ */
+function buildDeviceAuth(
+  identity: DeviceIdentity,
+  opts: { clientId: string; clientMode: string; role: string; scopes: string[]; token?: string }
+): { id: string; publicKey: string; signature: string; signedAt: number } {
+  const signedAtMs = Date.now()
+  const payload = [
+    'v1',
+    identity.deviceId,
+    opts.clientId,
+    opts.clientMode,
+    opts.role,
+    opts.scopes.join(','),
+    String(signedAtMs),
+    opts.token ?? '',
+  ].join('|')
+
+  return {
+    id: identity.deviceId,
+    publicKey: publicKeyRawBase64Url(identity.publicKeyPem),
+    signature: signPayload(identity.privateKeyPem, payload),
+    signedAt: signedAtMs,
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Plan types
@@ -142,6 +220,7 @@ export class GatewayClient implements IGatewayClient {
   private reconnectDelay = 1000
   private readonly maxReconnectDelay = 30_000
   private shouldReconnect = false
+  private deviceIdentity: DeviceIdentity | null
 
   /** Callback invoked when the gateway dispatches a node.invoke.request */
   onInvokeRequest?: (payload: InvokeRequestPayload) => void
@@ -150,6 +229,12 @@ export class GatewayClient implements IGatewayClient {
     this.url = url
     this.token = token
     this.targetSessionKey = sessionKey
+    this.deviceIdentity = loadDeviceIdentity()
+    if (this.deviceIdentity) {
+      console.log(`[Gateway] Device identity loaded: ${this.deviceIdentity.deviceId.slice(0, 12)}...`)
+    } else {
+      console.warn('[Gateway] No device identity found — scopes will be stripped by gateway')
+    }
   }
 
 
@@ -215,19 +300,30 @@ export class GatewayClient implements IGatewayClient {
   }
 
   private async authenticate(): Promise<void> {
+    const scopes = ['operator.write']
+    const clientId = 'gateway-client'
+    const clientMode = 'backend'
+    const role = 'operator'
+
+    const device = this.deviceIdentity
+      ? buildDeviceAuth(this.deviceIdentity, { clientId, clientMode, role, scopes, token: this.token })
+      : undefined
+
     // Skip connected check since we're establishing the connection
     return this.request('connect', {
       minProtocol: 3,
       maxProtocol: 3,
       client: {
-        id: 'gateway-client',
+        id: clientId,
         version: '1.0.0',
         platform: 'node',
-        mode: 'backend',
+        mode: clientMode,
       },
-      scopes: ['operator.write'],
+      role,
+      scopes,
       commands: ['talk'],
       auth: { token: this.token },
+      device,
     }, true) as Promise<void>
   }
 
@@ -397,12 +493,15 @@ export class GatewayClient implements IGatewayClient {
  * No persistent connection or reconnect logic needed.
  */
 export class OneShotGateway {
+  private deviceIdentity: DeviceIdentity | null
+
   constructor(
     private url: string,
     private token: string,
     private sessionKey: string = SESSION_KEY,
   ) {
-    console.log(`[OneShotGateway] url=${url} session=${sessionKey}`)
+    this.deviceIdentity = loadDeviceIdentity()
+    console.log(`[OneShotGateway] url=${url} session=${sessionKey} device=${this.deviceIdentity ? this.deviceIdentity.deviceId.slice(0, 12) + '...' : 'none'}`)
   }
 
   async triggerAgent(message: string): Promise<string[]> {
@@ -434,6 +533,15 @@ export class OneShotGateway {
       }
 
       const sendConnect = () => {
+        const scopes = ['operator.write']
+        const clientId = 'gateway-client'
+        const clientMode = 'backend'
+        const role = 'operator'
+
+        const device = this.deviceIdentity
+          ? buildDeviceAuth(this.deviceIdentity, { clientId, clientMode, role, scopes, token: this.token })
+          : undefined
+
         ws.send(JSON.stringify({
           type: 'req',
           id: authId,
@@ -442,14 +550,16 @@ export class OneShotGateway {
             minProtocol: 3,
             maxProtocol: 3,
             client: {
-              id: 'gateway-client',
+              id: clientId,
               version: '1.0.0',
               platform: 'node',
-              mode: 'backend',
+              mode: clientMode,
             },
-            scopes: ['operator.write'],
+            role,
+            scopes,
             commands: ['talk'],
             auth: this.token ? { token: this.token } : {},
+            device,
           },
         }))
       }
@@ -563,6 +673,7 @@ export class Coordinator {
   // === Plan State ===
   private currentPlan: Plan | null = null
   private planNudgeTimer: NodeJS.Timeout | null = null
+  private lastReplyContext: { username: string; message: string } | null = null
 
   // === Injected dependencies ===
   private readonly clock: IClock
@@ -662,8 +773,8 @@ export class Coordinator {
 
     this.startVibeLoop() // starts sleep/idle check timers + vibe loop (if mode=vibe)
 
-    // In plan mode, also start plan nudges if there are pending steps
-    if (this.config.autonomyMode === 'plan' && this.hasPendingPlanSteps()) {
+    // In plan mode, start plan nudges (pending steps or needs a new plan)
+    if (this.config.autonomyMode === 'plan' && this.needsPlanNudge()) {
       this.schedulePlanNudge()
     }
   }
@@ -696,7 +807,8 @@ export class Coordinator {
   }
 
   /** Signal that the agent is speaking (via tool call) — keeps coordinator awake */
-  notifySpeech(): void {
+  notifySpeech(replyContext?: { username: string; message: string }): void {
+    if (replyContext) this.lastReplyContext = replyContext
     if (this._state !== 'active') this.wake()
     else this.resetActivity()
   }
@@ -772,6 +884,11 @@ export class Coordinator {
     return this.currentPlan.steps.some(s => s.status === 'pending')
   }
 
+  /** Check if a plan nudge is needed — either pending steps or no plan at all */
+  private needsPlanNudge(): boolean {
+    return this.hasPendingPlanSteps() || !this.currentPlan || this.currentPlan.status !== 'active'
+  }
+
   // === Plan Nudge Loop ===
 
   /** Schedule next plan nudge (short delay to avoid spinning) */
@@ -779,7 +896,7 @@ export class Coordinator {
     this.cancelPlanNudge()
     if (this._state === 'sleep') return
     if (this.config.autonomyMode !== 'plan') return
-    if (!this.hasPendingPlanSteps()) return
+    if (!this.needsPlanNudge()) return
 
     const delay = this.config.planNudgeDelayMs
     const nextNudgeAt = this.clock.now() + delay
@@ -799,7 +916,7 @@ export class Coordinator {
   private checkPlanProgress(): void {
     if (this.config.autonomyMode !== 'plan') return
     if (this._state === 'sleep') return
-    if (this.hasPendingPlanSteps()) {
+    if (this.needsPlanNudge()) {
       this.schedulePlanNudge()
     }
   }
@@ -818,7 +935,7 @@ export class Coordinator {
       return
     }
 
-    if (!this.hasPendingPlanSteps()) {
+    if (!this.needsPlanNudge()) {
       this.logger.log('[Coordinator] Plan nudge skipped - no pending steps')
       this.emit({ type: 'planNudgeExecuted', skipped: true, reason: 'no pending steps' })
       return
@@ -882,7 +999,13 @@ export class Coordinator {
   /** Build the [CRAWD:PLAN] prompt with current plan progress */
   private buildPlanNudgePrompt(): string {
     if (!this.currentPlan || this.currentPlan.status !== 'active') {
-      return '[CRAWD:PLAN] No active plan. Come up with something fun to do — check X, browse HN, find something weird on the internet, go down a rabbit hole. Create a plan using plan_set with concrete steps. Be creative, not reactive. Or respond with NO_REPLY to idle.'
+      const ctx = this.lastReplyContext
+      this.lastReplyContext = null
+      const base = '[CRAWD:PLAN] No active plan. Come up with something to do — check X, browse HN, find something weird on the internet, go down a rabbit hole. Create a plan using plan_set with 2-4 concrete steps. Be creative and unpredictable.'
+      const chatHint = ctx
+        ? `\nRecent chat context: ${ctx.username} said "${ctx.message}" — you can riff on this, ignore it, or do something completely unrelated. Your call.`
+        : ''
+      return `${base}${chatHint}\nOr respond with NO_REPLY to idle.`
     }
 
     const lines: string[] = ['[CRAWD:PLAN] Continue your plan.', '']

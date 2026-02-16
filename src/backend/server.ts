@@ -157,7 +157,7 @@ export class CrawdBackend {
       return { spoken: false }
     }
 
-    this.coordinator?.notifySpeech()
+    this.coordinator?.notifySpeech({ username: chat.username, message: chat.message })
 
     const id = randomUUID()
     this.io.emit('crawd:reply-turn', {

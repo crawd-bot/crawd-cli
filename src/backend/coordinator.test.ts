@@ -281,7 +281,7 @@ describe('Coordinator — Plan Mode', () => {
       coord.stop()
     })
 
-    it('does not nudge when plan is completed', async () => {
+    it('nudges to create new plan when plan is completed', async () => {
       const coord = createCoordinator()
       coord.setPlan('Quick', ['Only step'])
       coord.markStepDone(0)
@@ -291,9 +291,49 @@ describe('Coordinator — Plan Mode', () => {
       clock.advance(200)
       await new Promise(r => setTimeout(r, 50))
 
-      // No plan nudge should have been sent
+      // Should nudge agent to create a new plan
       const planNudges = triggerFn.mock.calls.filter((c: any[]) => c[0]?.includes('[CRAWD:PLAN]'))
-      expect(planNudges).toHaveLength(0)
+      expect(planNudges).toHaveLength(1)
+      expect(planNudges[0][0]).toContain('No active plan')
+      expect(planNudges[0][0]).toContain('plan_set')
+
+      coord.stop()
+    })
+
+    it('includes reply context in plan nudge when no active plan', async () => {
+      const coord = createCoordinator()
+
+      // Agent replies to a chat message — no plan exists
+      coord.notifySpeech({ username: 'viewer42', message: 'yo you are popular on x' })
+
+      clock.advance(200)
+      await vi.waitFor(() => {
+        const calls = triggerFn.mock.calls.filter((c: any[]) => c[0]?.includes('[CRAWD:PLAN]'))
+        return expect(calls.length).toBeGreaterThan(0)
+      })
+
+      const planNudge = triggerFn.mock.calls.find((c: any[]) => c[0]?.includes('[CRAWD:PLAN]'))
+      expect(planNudge![0]).toContain('viewer42')
+      expect(planNudge![0]).toContain('yo you are popular on x')
+      // Chat context is a hint, not a directive
+      expect(planNudge![0]).toContain('ignore it')
+
+      coord.stop()
+    })
+
+    it('does not include chat hint when no reply context', async () => {
+      const coord = createCoordinator()
+
+      coord.wake()
+
+      clock.advance(200)
+      await vi.waitFor(() => {
+        const calls = triggerFn.mock.calls.filter((c: any[]) => c[0]?.includes('[CRAWD:PLAN]'))
+        return expect(calls.length).toBeGreaterThan(0)
+      })
+
+      const planNudge = triggerFn.mock.calls.find((c: any[]) => c[0]?.includes('[CRAWD:PLAN]'))
+      expect(planNudge![0]).not.toContain('Recent chat context')
 
       coord.stop()
     })
